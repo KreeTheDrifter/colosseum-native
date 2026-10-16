@@ -1,0 +1,15 @@
+# Game data and anything derived from it never goes in this repository.
+iso/
+*.iso
+*.ciso
+*.gcm
+*.rvz
+*.part[0-9]*
+extracted/
+generated/
+recomp/
+build/
+build-*/
+*.dol
+*.fsys
+__pycache__/
