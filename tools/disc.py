@@ -57,6 +57,16 @@ def extract(iso, out):
         fst_off, fst_size = struct.unpack(">II", f.read(8))
         f.seek(fst_off)
         fst = f.read(fst_size)
+        # System area, laid out the way Dolphin and ModernGekko expect.
+        f.seek(0)
+        sys_area = f.read(0x2440 + 0x20)
+        app_size, app_trailer = struct.unpack(">II", sys_area[0x2454:0x245C])
+        f.seek(0x2440)
+        apploader = f.read(0x20 + app_size + app_trailer)
+        for name, data in (("boot.bin", sys_area[:0x440]), ("bi2.bin", sys_area[0x440:0x2440]),
+                           ("apploader.img", apploader), ("fst.bin", fst)):
+            with open(f"{out}/sys/{name}", "wb") as d:
+                d.write(data)
         n = struct.unpack(">I", fst[8:12])[0]
         strings = n * 12
 
