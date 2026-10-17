@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 
+#include "dol_patches.h"
+
 namespace fs = std::filesystem;
 
 namespace
@@ -206,6 +208,55 @@ void WriteText(const fs::path& path, const std::string& text)
   out << text;
 }
 
+// Offset of a RAM address inside a DOL image, or SIZE_MAX if no section holds it.
+size_t DolOffset(const std::vector<uint8_t>& dol, uint32_t address)
+{
+  if (dol.size() < 0x100)
+    return SIZE_MAX;
+  for (int i = 0; i < 18; ++i)
+  {
+    const uint32_t off = be32(&dol[i * 4]);
+    const uint32_t addr = be32(&dol[0x48 + i * 4]);
+    const uint32_t size = be32(&dol[0x90 + i * 4]);
+    if (size && address >= addr && address - addr < size && off + (address - addr) + 4 <= dol.size())
+      return off + (address - addr);
+  }
+  return SIZE_MAX;
+}
+
+enum class DolState { Original, Patched, Unknown };
+
+// The recompiled code was built from main.dol with kDolPatches applied (widescreen,
+// 60 fps, memory-card fix); the game must boot that exact DOL.
+DolState CheckDol(const std::vector<uint8_t>& dol)
+{
+  bool all_new = true;
+  for (const DolPatch& p : kDolPatches)
+  {
+    const size_t at = DolOffset(dol, p.address);
+    if (at == SIZE_MAX)
+      return DolState::Unknown;
+    if (be32(&dol[at]) != p.replacement)
+      all_new = false;
+  }
+  if (all_new)
+    return DolState::Patched;
+  return Sha1Hex(dol) == kMainDolSha1 ? DolState::Original : DolState::Unknown;
+}
+
+std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol)
+{
+  for (const DolPatch& p : kDolPatches)
+  {
+    const size_t at = DolOffset(dol, p.address);
+    dol[at] = uint8_t(p.replacement >> 24);
+    dol[at + 1] = uint8_t(p.replacement >> 16);
+    dol[at + 2] = uint8_t(p.replacement >> 8);
+    dol[at + 3] = uint8_t(p.replacement);
+  }
+  return dol;
+}
+
 std::vector<uint8_t> ReadDol(Disc& disc)
 {
   const auto ptr = disc.Read(0x420, 4);
@@ -241,7 +292,7 @@ void Unpack(Disc& disc, const std::vector<uint8_t>& dol, const fs::path& root)
   if (fst.size() < 12)
     Fail(L"The disc's file table could not be read.");
 
-  WriteFile(partial / "sys" / "main.dol", dol);
+  WriteFile(partial / "sys" / "main.dol", PatchDol(dol));
   WriteFile(partial / "sys" / "boot.bin", {sys_area.begin(), sys_area.begin() + 0x440});
   WriteFile(partial / "sys" / "bi2.bin", {sys_area.begin() + 0x440, sys_area.begin() + 0x2440});
   WriteFile(partial / "sys" / "apploader.img", disc.Read(0x2440, 0x20 + app_size + app_trailer));
@@ -285,7 +336,7 @@ void Unpack(Disc& disc, const std::vector<uint8_t>& dol, const fs::path& root)
 // Sets key=value under [section] in a Dolphin-style ini, but only when the key is not
 // there yet, so later builds can add required settings without undoing user edits.
 void EnsureIni(const fs::path& path, const std::string& section, const std::string& key,
-               const std::string& value)
+               const std::string& value, bool overwrite = false)
 {
   std::vector<std::string> lines;
   {
@@ -323,7 +374,16 @@ void EnsureIni(const fs::path& path, const std::string& section, const std::stri
     if (in_section)
     {
       if (const auto eq = t.find('='); eq != std::string::npos && trim(t.substr(0, eq)) == key)
-        return;  // already set; keep the user's value
+      {
+        if (!overwrite || trim(t.substr(eq + 1)) == value)
+          return;  // already set; keep the user's value
+        lines[i] = key + " = " + value;
+        std::string text;
+        for (const auto& line : lines)
+          text += line + "\n";
+        WriteText(path, text);
+        return;
+      }
       if (!t.empty())
         insert_at = i + 1;
     }
@@ -342,6 +402,29 @@ void EnsureIni(const fs::path& path, const std::string& section, const std::stri
   WriteText(path, text);
 }
 
+// Launcher state (which versions of our defaults an install has), in
+// User\Config\ColosseumNative.ini.
+int ReadState(const fs::path& user, const std::string& key)
+{
+  std::ifstream in(user / "Config" / "ColosseumNative.ini");
+  for (std::string line; std::getline(in, line);)
+  {
+    const auto eq = line.find('=');
+    if (eq == std::string::npos)
+      continue;
+    std::string k = line.substr(0, eq);
+    k.erase(k.find_last_not_of(" \t") + 1);
+    if (k == key)
+      return std::atoi(line.c_str() + eq + 1);
+  }
+  return 0;
+}
+
+void WriteState(const fs::path& user, const std::string& key, int value)
+{
+  EnsureIni(user / "Config" / "ColosseumNative.ini", "Launcher", key, std::to_string(value), true);
+}
+
 // Controller profile for GameCube port 1. Xbox (and other XInput) controllers bind by
 // position: GameCube B is on Xbox X, GameCube X on Xbox B. Keyboard keys are bound in the
 // same profile through device-qualified controls, so either works at any time.
@@ -349,16 +432,10 @@ void EnsureIni(const fs::path& path, const std::string& section, const std::stri
 // comments), so the installed version is kept in User\Config\ColosseumNative.ini.
 constexpr int kPadProfileVersion = 1;
 
-void WriteControllerProfile(const fs::path& path)
+void WriteControllerProfile(const fs::path& user)
 {
-  const fs::path state = path.parent_path() / "ColosseumNative.ini";
-  int installed = 0;
-  {
-    std::ifstream in(state);
-    for (std::string line; std::getline(in, line);)
-      if (line.rfind("PadProfile=", 0) == 0)
-        installed = std::atoi(line.c_str() + 11);
-  }
+  const fs::path path = user / "Config" / "GCPadNew.ini";
+  const int installed = ReadState(user, "PadProfile");
   {
     // Replace a missing or empty profile, or our own older default; keep anything else.
     std::ifstream in(path);
@@ -406,7 +483,7 @@ void WriteControllerProfile(const fs::path& path)
   p += "Rumble/Motor = `Motor L` | `Motor R`\n";
   p += "[GCPad2]\n[GCPad3]\n[GCPad4]\n";
   WriteText(path, p);
-  WriteText(state, "[Launcher]\nPadProfile=" + std::to_string(kPadProfileVersion) + "\n");
+  WriteState(user, "PadProfile", kPadProfileVersion);
 }
 
 // Default settings. Whole files are written only when missing; required keys are added
@@ -438,8 +515,8 @@ void WriteDefaultSettings(const fs::path& user)
   {
     WriteText(gfx,
               "[Settings]\n"
-              "AspectRatio = 0\n"
-              "wideScreenHack = True\n"
+              "AspectRatio = 1\n"
+              "wideScreenHack = False\n"
               "MSAA = 0x00000004\n"
               "SSAA = False\n"
               "EnablePixelLighting = True\n"
@@ -458,7 +535,19 @@ void WriteDefaultSettings(const fs::path& user)
   EnsureIni(gfx, "Settings", "SafeTextureCacheColorSamples", "0");
   EnsureIni(gfx, "Settings", "CPUCull", "True");
 
-  WriteControllerProfile(user / "Config" / "GCPadNew.ini");
+  // Graphics defaults v2: the game itself now renders 16:9 (patched into the
+  // recompiled code), so lock the output to 16:9 and turn off Dolphin's widescreen
+  // hack, whose automatic 4:3/16:9 detection flipped between areas. Applied once
+  // to installs made with an older default.
+  constexpr int kGfxDefaultsVersion = 2;
+  if (ReadState(user, "GfxDefaults") < kGfxDefaultsVersion)
+  {
+    EnsureIni(gfx, "Settings", "AspectRatio", "1", true);
+    EnsureIni(gfx, "Settings", "wideScreenHack", "False", true);
+    WriteState(user, "GfxDefaults", kGfxDefaultsVersion);
+  }
+
+  WriteControllerProfile(user);
 
   // Memory card: a standard formatted card file in User\GC (Dolphin .raw format).
   const fs::path dolphin = user / "Config" / "Dolphin.ini";
@@ -558,6 +647,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
 
   if (!GameReady(game) || !disc_arg.empty())
     SetupGame(game, disc_arg);
+
+  // Installs unpacked by an older build hold the original main.dol; patch it in place.
+  {
+    const fs::path dol_path = game / "sys" / "main.dol";
+    std::ifstream in(dol_path, std::ios::binary);
+    std::vector<uint8_t> dol((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    switch (CheckDol(dol))
+    {
+    case DolState::Patched:
+      break;
+    case DolState::Original:
+      if (!WriteFile(dol_path, PatchDol(std::move(dol))))
+        Fail(L"Could not update Game\\sys\\main.dol. Is the folder read-only?");
+      break;
+    case DolState::Unknown:
+      Fail(L"Game\\sys\\main.dol doesn't match this build. Delete the Game folder and run "
+           L"ColosseumNative.exe again to unpack your disc.");
+    }
+  }
   WriteDefaultSettings(user);
   if (setup_only)
     return 0;
