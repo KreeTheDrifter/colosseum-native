@@ -7,20 +7,20 @@ inline constexpr DolPatch kDolPatches[] = {
     {0x801CFC2Cu, 0x418100ACu, 0x9005002Cu},
     {0x801CFC7Cu, 0x4082005Cu, 0x60000000u},
     {0x800A3930u, 0xFFA01090u, 0x4BF619D1u},
-    {0x80005300u, 0x00000000u, 0x3D808000u},
-    {0x80005304u, 0x00000000u, 0xC3AC1804u},
+    {0x80005300u, 0x00000000u, 0x3D808026u},
+    {0x80005304u, 0x00000000u, 0xC3AC6374u},
     {0x80005308u, 0x00000000u, 0xEFA20772u},
     {0x8000530Cu, 0x00000000u, 0x4E800020u},
     {0x80005D98u, 0x886D85B0u, 0x4BFFF579u},
     {0x80005310u, 0x00000000u, 0x886D85B0u},
-    {0x80005314u, 0x00000000u, 0x3D808000u},
-    {0x80005318u, 0x00000000u, 0x880C1800u},
+    {0x80005314u, 0x00000000u, 0x3D808026u},
+    {0x80005318u, 0x00000000u, 0x880C6370u},
     {0x8000531Cu, 0x00000000u, 0x7C630038u},
     {0x80005320u, 0x00000000u, 0x4E800020u},
 };
 
-inline constexpr uint32_t kSettingsAddr = 0x80001800u;
-inline constexpr uint32_t kSettingsSize = 0x20u;
+inline constexpr uint32_t kSettingsAddr = 0x80266370u;
+inline constexpr uint32_t kSettingsSize = 0x8u;
 inline constexpr uint8_t kFpsMask60 = 0x00u;
 inline constexpr uint8_t kFpsMaskOriginal = 0xFFu;
 struct AspectChoice { const char* name; float multiplier; };

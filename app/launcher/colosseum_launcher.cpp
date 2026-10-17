@@ -232,29 +232,16 @@ void Put32(std::vector<uint8_t>& d, size_t at, uint32_t v)
   d[at + 3] = uint8_t(v);
 }
 
-// Undo any version of our patches: original words back at every patch site and the
-// settings section removed. For a genuine USA main.dol (patched or not) the result
-// hashes to kMainDolSha1; anything else is a modified or damaged file.
+// Undo our patches: original words back at every patch site and the settings bytes
+// zeroed. For a genuine USA main.dol (patched by any build or not) the result hashes to
+// kMainDolSha1; anything else is a modified or damaged file.
 std::vector<uint8_t> RestoreOriginalDol(std::vector<uint8_t> dol)
 {
-  if (dol.size() < 0x100)
+  const size_t settings = DolOffset(dol, kSettingsAddr);
+  if (settings == SIZE_MAX || DolOffset(dol, kSettingsAddr + kSettingsSize - 4) == SIZE_MAX)
     return {};
-  for (int i = 7; i < 18; ++i)
-  {
-    if (be32(&dol[0x48 + i * 4]) == kSettingsAddr)
-    {
-      Put32(dol, i * 4, 0);
-      Put32(dol, 0x48 + i * 4, 0);
-      Put32(dol, 0x90 + i * 4, 0);
-    }
-  }
-  uint32_t end = 0;
-  for (int i = 0; i < 18; ++i)
-    if (be32(&dol[0x90 + i * 4]))
-      end = std::max(end, be32(&dol[i * 4]) + be32(&dol[0x90 + i * 4]));
-  if (end > dol.size())
-    return {};
-  dol.resize(end);
+  std::fill(dol.begin() + std::ptrdiff_t(settings),
+            dol.begin() + std::ptrdiff_t(settings + kSettingsSize), uint8_t(0));
   for (const DolPatch& p : kDolPatches)
   {
     const size_t at = DolOffset(dol, p.address);
@@ -272,26 +259,17 @@ struct GameSettings
   float aspect_multiplier = 4.0f / 3.0f;
 };
 
-// Apply the code patches to an original main.dol and append the settings block the
+// Apply the code patches to an original main.dol and write the settings bytes the
 // patched code reads (same layout as tools/disc.py).
 std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol, const GameSettings& settings)
 {
   for (const DolPatch& p : kDolPatches)
     Put32(dol, DolOffset(dol, p.address), p.replacement);
-  std::vector<uint8_t> block(kSettingsSize, 0);
-  block[0] = settings.fps60 ? kFpsMask60 : kFpsMaskOriginal;
+  const size_t at = DolOffset(dol, kSettingsAddr);
+  dol[at] = settings.fps60 ? kFpsMask60 : kFpsMaskOriginal;
   uint32_t bits;
   memcpy(&bits, &settings.aspect_multiplier, 4);
-  Put32(block, 4, bits);
-  int slot = 7;
-  while (slot < 18 && be32(&dol[0x90 + slot * 4]) != 0)
-    ++slot;
-  dol.resize((dol.size() + 0x1F) & ~size_t(0x1F), 0);
-  const uint32_t at = uint32_t(dol.size());
-  dol.insert(dol.end(), block.begin(), block.end());
-  Put32(dol, slot * 4, at);
-  Put32(dol, 0x48 + slot * 4, kSettingsAddr);
-  Put32(dol, 0x90 + slot * 4, kSettingsSize);
+  Put32(dol, at + 4, bits);
   return dol;
 }
 

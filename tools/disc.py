@@ -30,8 +30,8 @@ DOL_PATCHES = [
     # (1.0 = original 4:3). Reworked from Dolphin's "16:9 Widescreen" code: a plain call
     # instead of a jump into the middle of a function, and a runtime setting.
     (0x800A3930, 0xFFA01090, 0x4BF619D1),  # fmr f29,f2  ->  bl 0x80005300
-    (0x80005300, 0x00000000, 0x3D808000),  # lis   r12, 0x8000
-    (0x80005304, 0x00000000, 0xC3AC1804),  # lfs   f29, 0x1804(r12)   (aspect multiplier)
+    (0x80005300, 0x00000000, 0x3D808026),  # lis   r12, 0x8026
+    (0x80005304, 0x00000000, 0xC3AC6374),  # lfs   f29, 0x6374(r12)   (aspect multiplier)
     (0x80005308, 0x00000000, 0xEFA20772),  # fmuls f29, f2, f29
     (0x8000530C, 0x00000000, 0x4E800020),  # blr
 
@@ -42,17 +42,20 @@ DOL_PATCHES = [
     # From Dolphin's "60 FPS [Nerdzilla]" (which forces 0).
     (0x80005D98, 0x886D85B0, 0x4BFFF579),  # lbz r3,-0x7a50(r13) -> bl 0x80005310
     (0x80005310, 0x00000000, 0x886D85B0),  # lbz r3, -0x7a50(r13)   (game's flag)
-    (0x80005314, 0x00000000, 0x3D808000),  # lis r12, 0x8000
-    (0x80005318, 0x00000000, 0x880C1800),  # lbz r0, 0x1800(r12)    (frame-rate mask)
+    (0x80005314, 0x00000000, 0x3D808026),  # lis r12, 0x8026
+    (0x80005318, 0x00000000, 0x880C6370),  # lbz r0, 0x6370(r12)    (frame-rate mask)
     (0x8000531C, 0x00000000, 0x7C630038),  # and r3, r3, r0
     (0x80005320, 0x00000000, 0x4E800020),  # blr
 ]
 
-# Settings block read by the patched code, added to main.dol as an extra data section
-# at 0x80001800 (low memory GameCube games leave free for debuggers). ModernGekko only
-# verifies code ranges, so the launcher can rewrite these bytes without rebuilding.
-SETTINGS_ADDR = 0x80001800
-SETTINGS_SIZE = 0x20
+# Settings read by the patched code, stored in bytes of main.dol that nothing uses: the
+# 0x20-byte data section at 0x80266360 is the static-constructor list, which
+# __init_cpp (0x800A2BBC) walks until the first zero word, and its first word is zero.
+# Data sections aren't part of ModernGekko's code verification, so the launcher can
+# rewrite these bytes per launch without rebuilding. (0x80001800, tried first, is
+# overwritten at run time.)
+SETTINGS_ADDR = 0x80266370
+SETTINGS_SIZE = 0x8
 FPS_MASK_60 = 0x00        # +0x0 u8: 0x00 = 60 fps everywhere, 0xFF = original 30/60
 FPS_MASK_ORIGINAL = 0xFF
 ASPECTS = {"4:3": 1.0, "16:9": 4 / 3, "16:10": 1.2, "21:9": 1.75, "32:9": 8 / 3}  # +0x4 f32
@@ -65,22 +68,12 @@ def settings_block(fps60=True, aspect="16:9"):
     return bytes(block)
 
 
-def set_settings_section(dol, block):
-    """Add (or update) the settings data section in a DOL image."""
-    addrs = struct.unpack(">18I", dol[0x48:0x90])
-    sizes = struct.unpack(">18I", dol[0x90:0xD8])
-    for i in range(7, 18):
-        if addrs[i] == SETTINGS_ADDR and sizes[i] == SETTINGS_SIZE:
-            at = struct.unpack(">I", dol[i * 4:i * 4 + 4])[0]
-            dol[at:at + SETTINGS_SIZE] = block
-            return
-    slot = next(i for i in range(7, 18) if sizes[i] == 0)
-    dol.extend(bytes(-len(dol) % 0x20))
-    at = len(dol)
-    dol.extend(block)
-    struct.pack_into(">I", dol, slot * 4, at)
-    struct.pack_into(">I", dol, 0x48 + slot * 4, SETTINGS_ADDR)
-    struct.pack_into(">I", dol, 0x90 + slot * 4, SETTINGS_SIZE)
+def write_settings(dol, block):
+    """Write the settings bytes into main.dol (they're zero in the original)."""
+    at = dol_offset(dol, SETTINGS_ADDR)
+    if dol_offset(dol, SETTINGS_ADDR + SETTINGS_SIZE - 1) != at + SETTINGS_SIZE - 1:
+        raise ValueError("settings range crosses a section boundary")
+    dol[at:at + SETTINGS_SIZE] = block
 
 
 def dol_offset(dol, address):
@@ -101,7 +94,7 @@ def patch_dol(src, dst):
         if cur not in (old, new):
             sys.exit(f"unexpected word {cur:#010x} at {address:#x}; is this the USA main.dol?")
         dol[at:at + 4] = struct.pack(">I", new)
-    set_settings_section(dol, settings_block())
+    write_settings(dol, settings_block())
     open(dst, "wb").write(dol)
     print(f"patched {len(DOL_PATCHES)} words + settings block -> {dst}")
 
