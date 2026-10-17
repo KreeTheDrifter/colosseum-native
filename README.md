@@ -5,7 +5,7 @@ Pokémon Colosseum (GameCube, USA) as a native Windows and Android app, built by
 with [DolRecomp](https://github.com/ExpansionPak/DolRecomp) and runs on the
 [ModernGekko](https://github.com/ExpansionPak/ModernGekko) runtime. The goal is the
 highest-fidelity way to play it: high internal resolution, MSAA/SSAA, 16× anisotropic
-filtering, widescreen and ultrawide, texture packs, and up to 144 fps.
+filtering, widescreen and ultrawide, texture packs, and 120 fps through rendered in-between frames.
 
 **Status: boots to the title screen.** The full main.dol recompiles (623,456
 instructions, 0 unknown) and runs entirely as native code (0 interpreter fallbacks,

@@ -155,6 +155,832 @@ index 8d0ae0c..f4a5bb3 100644
        if (key == XK_Escape && (event.xkey.state & ControlMask))
        {
          RequestShutdown();
+diff --git a/Source/Core/VideoCommon/BPStructs.cpp b/Source/Core/VideoCommon/BPStructs.cpp
+index 180bc86..a131800 100644
+--- a/Source/Core/VideoCommon/BPStructs.cpp
++++ b/Source/Core/VideoCommon/BPStructs.cpp
+@@ -25,6 +25,7 @@
+ #include "VideoCommon/BoundingBox.h"
+ #include "VideoCommon/Fifo.h"
+ #include "VideoCommon/FramebufferManager.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/GeometryShaderManager.h"
+ #include "VideoCommon/OpcodeDecoding.h"
+ #include "VideoCommon/PerfQueryBase.h"
+@@ -178,6 +179,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+   // Triggers an interrupt on the PPC side so that the game knows when the GPU has finished drawing.
+   // Tokens are similar.
+   case BPMEM_SETDRAWDONE:
++    if (FrameInterpolation::g_replaying)  // the CPU already got this one
++      return;
+     switch (bp.newvalue & 0xFF)
+     {
+     case 0x02:
+@@ -201,6 +204,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+     return;
+   case BPMEM_PE_TOKEN_ID:  // Pixel Engine Token ID
+   {
++    if (FrameInterpolation::g_replaying)
++      return;
+     INCSTAT(g_stats.this_frame.num_token);
+     g_texture_cache->FlushEFBCopies();
+     g_texture_cache->FlushStaleBinds();
+@@ -217,6 +222,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+   }
+   case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
+   {
++    if (FrameInterpolation::g_replaying)
++      return;
+     INCSTAT(g_stats.this_frame.num_token_int);
+     g_texture_cache->FlushEFBCopies();
+     g_texture_cache->FlushStaleBinds();
+@@ -335,6 +342,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+                       destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
+                       bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
+ 
++        if (FrameInterpolation::g_replaying)
++        {
++          // The in-between frame: copy to a private texture, no RAM, no end-of-frame events.
++          FrameInterpolation::OnReplayXFBCopy(g_texture_cache->CopyXFBToPrivateEntry(
++              copy_width, height, destStride, srcRect, yScale, s_gammaLUT[PE_copy.gamma],
++              bpmem.triggerEFBCopy.clamp_top, bpmem.triggerEFBCopy.clamp_bottom,
++              bpmem.copyfilter.GetCoefficients()));
++        }
++        else
++        {
+         bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
+         g_texture_cache->CopyRenderTargetToTexture(
+             destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
+@@ -351,6 +368,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+         // memory so they form a single completed XFB. See
+         // https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
+         system.GetVideoEvents().after_frame_event.Trigger(system);
++        FrameInterpolation::OnLiveXFBCopy(destAddr);
+ 
+         // Note: Theoretically, in the future we could track the VI configuration and try to detect
+         //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
+@@ -371,6 +389,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+             vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
+           }
+         }
++        }
+       }
+     }
+ 
+@@ -519,6 +538,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+   case BPMEM_CLEARBBOX1:
+   case BPMEM_CLEARBBOX2:
+   {
++    if (FrameInterpolation::g_replaying)
++      return;
+     const u8 offset = bp.address & 2;
+     g_bounding_box->Enable(pixel_shader_manager);
+ 
+diff --git a/Source/Core/VideoCommon/CMakeLists.txt b/Source/Core/VideoCommon/CMakeLists.txt
+index 69a0968..c19049f 100644
+--- a/Source/Core/VideoCommon/CMakeLists.txt
++++ b/Source/Core/VideoCommon/CMakeLists.txt
+@@ -66,6 +66,8 @@ add_library(videocommon
+   FramebufferShaderGen.cpp
+   FramebufferShaderGen.h
+   FrameDumper.cpp
++  FrameInterpolation.cpp
++  FrameInterpolation.h
+   FrameDumper.h
+   FrameDumpFFMpeg.h
+   FreeLookCamera.cpp
+diff --git a/Source/Core/VideoCommon/FrameInterpolation.cpp b/Source/Core/VideoCommon/FrameInterpolation.cpp
+new file mode 100644
+index 0000000..23279ac
+--- /dev/null
++++ b/Source/Core/VideoCommon/FrameInterpolation.cpp
+@@ -0,0 +1,668 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "VideoCommon/FrameInterpolation.h"
++
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <bit>
++#include <chrono>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <unordered_map>
++#include <vector>
++
++#include "Common/ChunkFile.h"
++#include "Common/Swap.h"
++#include "Core/System.h"
++#include "VideoCommon/BPMemory.h"
++#include "VideoCommon/BPStructs.h"
++#include "VideoCommon/CPMemory.h"
++#include "VideoCommon/GeometryShaderManager.h"
++#include "VideoCommon/OpcodeDecoding.h"
++#include "VideoCommon/PixelShaderManager.h"
++#include "VideoCommon/TMEM.h"
++#include "VideoCommon/TextureCacheBase.h"
++#include "VideoCommon/TextureDecoder.h"
++#include "VideoCommon/VertexLoaderBase.h"
++#include "VideoCommon/VertexLoaderManager.h"
++#include "VideoCommon/VertexManagerBase.h"
++#include "VideoCommon/VertexShaderManager.h"
++#include "VideoCommon/XFMemory.h"
++#include "VideoCommon/XFStateManager.h"
++#include "VideoCommon/XFStructs.h"
++
++namespace FrameInterpolation
++{
++bool g_recording = false;
++bool g_hook = false;
++bool g_replaying = false;
++
++namespace
++{
++std::atomic<bool> s_want_enabled{false};
++
++// One XF write (immediate or indexed) in recording order.
++struct XFEvent
++{
++  u16 address;
++  u8 count;        // 0: indexed load that couldn't be read; replays as a no-op
++  u32 offset;      // into the frame's value pool (big-endian words, as on the wire)
++  u64 signature;   // the first draw after this write
++  u64 loose;       // the same without vertex count and vertex array address
++};
++
++struct Frame
++{
++  std::vector<u8> commands;
++  std::vector<XFEvent> events;
++  std::vector<u32> values;
++  size_t unsigned_from = 0;  // events still waiting for a draw signature
++
++  void Clear()
++  {
++    commands.clear();
++    events.clear();
++    values.clear();
++    unsigned_from = 0;
++  }
++};
++
++Frame s_cur;
++Frame s_prev;
++bool s_have_prev = false;
++bool s_frame_end_pending = false;
++u32 s_pending_xfb_addr = 0;
++
++std::vector<u8> s_start_state;  // GPU state when s_cur began
++std::vector<u8> s_live_state;   // scratch
++bool s_have_start = false;
++
++std::vector<u32> s_interp_values;  // per s_cur.values, blended
++float s_t = 0.5f;
++bool s_log = false;
++bool s_debug_frame = false;
++
++std::shared_ptr<TCacheEntry> s_replay_result;
++// Finished in-between frames, by the XFB address of the real frame they precede. The video
++// interface usually shows an XFB one frame after it was drawn (the game renders the next frame
++// into the other buffer meanwhile), so more than one can be waiting.
++struct Ready
++{
++  u32 addr = 0;
++  std::shared_ptr<TCacheEntry> entry;
++};
++std::array<Ready, 4> s_ready;
++u32 s_ready_seq = 0;
++
++void DropReady(u32 addr)
++{
++  for (Ready& r : s_ready)
++  {
++    if (r.entry && r.addr == addr)
++      r.entry.reset();
++  }
++}
++
++// Statistics (s_log).
++u32 s_stat_frames = 0, s_stat_replayed = 0, s_stat_cuts = 0;
++u64 s_stat_events = 0, s_stat_matched = 0;
++double s_stat_ms = 0;
++
++u64 Mix(u64 h, u64 v)
++{
++  h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
++  return h;
++}
++
++void DoGpuState(PointerWrap& p)
++{
++  auto& system = Core::System::GetInstance();
++  p.Do(bpmem);
++  p.Do(g_main_cp_state);
++  p.Do(xfmem);
++  p.DoArray(s_tex_mem);
++  TMEM::DoState(p);
++  system.GetPixelShaderManager().DoState(p);
++  system.GetVertexShaderManager().DoState(p);
++  system.GetGeometryShaderManager().DoState(p);
++  g_vertex_manager->DoState(p);
++  system.GetXFStateManager().DoState(p);
++  if (p.IsReadMode())
++  {
++    BPReload();
++    VertexLoaderManager::MarkAllDirty();
++  }
++}
++
++void SaveGpuState(std::vector<u8>& buf)
++{
++  if (buf.empty())
++    buf.resize(2 * 1024 * 1024);
++  for (;;)
++  {
++    u8* ptr = buf.data();
++    PointerWrap p(&ptr, buf.size(), PointerWrap::Mode::Write);
++    DoGpuState(p);
++    const size_t used = p.GetOffsetFromPreviousPosition(buf.data());
++    if (p.IsWriteMode())
++      return;
++    buf.resize(used + 4096);
++  }
++}
++
++void LoadGpuState(std::vector<u8>& buf)
++{
++  u8* ptr = buf.data();
++  PointerWrap p(&ptr, buf.size(), PointerWrap::Mode::Read);
++  DoGpuState(p);
++}
++
++float F(u32 big_endian)
++{
++  return std::bit_cast<float>(Common::swap32(big_endian));
++}
++u32 BE(float f)
++{
++  return Common::swap32(std::bit_cast<u32>(f));
++}
++
++bool Finite(float f)
++{
++  return std::isfinite(f);
++}
++
++// Rows of a 3x4 (stride 4) or 3x3 (stride 3) matrix rotated by more than ~60 degrees between the
++// two frames: almost certainly a mismatched object, or a cut.
++bool RotationJump(const u32* a, const u32* b, int stride)
++{
++  for (int r = 0; r < 3; ++r)
++  {
++    float dot = 0, la = 0, lb = 0;
++    for (int c = 0; c < 3; ++c)
++    {
++      const float x = F(a[r * stride + c]), y = F(b[r * stride + c]);
++      dot += x * y;
++      la += x * x;
++      lb += y * y;
++    }
++    if (la < 1e-12f || lb < 1e-12f)
++      continue;
++    if (dot < 0.5f * std::sqrt(la * lb))
++      return true;
++  }
++  return false;
++}
++
++// Blends event `e` of s_cur against `p` of s_prev into s_interp_values. Returns true if any
++// value was interpolated.
++// Translation of a 3x4 matrix moved by more than 15% of its distance from the eye: not the
++// same object (used for loosely matched loads only).
++bool TranslationJump(const u32* a, const u32* b)
++{
++  float d2 = 0, na = 0, nb = 0;
++  for (int r = 0; r < 3; ++r)
++  {
++    const float x = F(a[r * 4 + 3]), y = F(b[r * 4 + 3]);
++    d2 += (x - y) * (x - y);
++    na += x * x;
++    nb += y * y;
++  }
++  const float limit = 0.15f * std::sqrt(std::max(na, nb)) + 1e-3f;
++  return d2 > limit * limit;
++}
++
++bool Blend(const XFEvent& e, const XFEvent& p, bool loose)
++{
++  const u32* a = &s_prev.values[p.offset];
++  const u32* b = &s_cur.values[e.offset];
++  u32* out = &s_interp_values[e.offset];
++  const u32 base = e.address;
++  const u32 n = e.count;
++
++  // Whole-matrix guards.
++  bool reject = false;
++  if (base < XFMEM_POSMATRICES_END || (base >= XFMEM_POSTMATRICES && base < XFMEM_POSTMATRICES_END))
++  {
++    for (u32 m = 0; m + 12 <= n && !reject; m += 12)
++      reject = RotationJump(a + m, b + m, 4) || (loose && TranslationJump(a + m, b + m));
++  }
++  else if (base >= XFMEM_NORMALMATRICES && base < XFMEM_NORMALMATRICES_END)
++  {
++    for (u32 m = 0; m + 9 <= n && !reject; m += 9)
++      reject = RotationJump(a + m, b + m, 3);
++  }
++  if (reject)
++    return false;
++
++  // Projection: only between two projections of the same kind.
++  bool projection_ok = true;
++  if (base <= XFMEM_SETPROJECTION + 6 && base + n > XFMEM_SETPROJECTION + 6)
++  {
++    const u32 i = XFMEM_SETPROJECTION + 6 - base;
++    projection_ok = a[i] == b[i];
++  }
++
++  bool any = false;
++  for (u32 i = 0; i < n; ++i)
++  {
++    const u32 addr = base + i;
++    bool lerp = false;
++    bool texture_translation = false;
++    if (addr < XFMEM_POSMATRICES_END)
++    {
++      lerp = true;
++      // Texture matrices (GX_TEXMTX0 = 30, i.e. word 120 onward): don't slide back across a
++      // scrolling texture's wrap-around.
++      texture_translation = addr >= 120 && (addr & 3) == 3;
++    }
++    else if (addr >= XFMEM_NORMALMATRICES && addr < XFMEM_NORMALMATRICES_END)
++    {
++      lerp = true;
++    }
++    else if (addr >= XFMEM_POSTMATRICES && addr < XFMEM_POSTMATRICES_END)
++    {
++      lerp = true;
++      texture_translation = (addr & 3) == 3;
++    }
++    else if (addr >= XFMEM_LIGHTS && addr < XFMEM_LIGHTS_END)
++    {
++      // Light: 3 reserved, colour, cos att x3, dist att x3, position x3, direction x3.
++      lerp = ((addr - XFMEM_LIGHTS) & 15) >= 10;
++    }
++    else if (addr >= XFMEM_SETPROJECTION && addr < XFMEM_SETPROJECTION + 6)
++    {
++      lerp = projection_ok;
++    }
++
++    if (addr >= XFMEM_SETCHAN0_AMBCOLOR && addr <= XFMEM_SETCHAN1_MATCOLOR && a[i] != b[i])
++    {
++      // Ambient / material colours (RGBA8): fades and flashes.
++      const u32 ca = Common::swap32(a[i]), cb = Common::swap32(b[i]);
++      u32 c = 0;
++      for (int sh = 0; sh < 32; sh += 8)
++      {
++        const float x = float((ca >> sh) & 0xff), y = float((cb >> sh) & 0xff);
++        c |= u32(std::clamp(std::lround(x + (y - x) * s_t), 0L, 255L)) << sh;
++      }
++      out[i] = Common::swap32(c);
++      any = true;
++      continue;
++    }
++    if (!lerp || a[i] == b[i])
++      continue;
++    const float fa = F(a[i]), fb = F(b[i]);
++    if (!Finite(fa) || !Finite(fb))
++      continue;
++    if (texture_translation && std::fabs(fb - fa) > 0.3f)
++      continue;
++    out[i] = BE(fa + (fb - fa) * s_t);
++    any = true;
++  }
++  return any;
++}
++
++// Fills s_interp_values. Returns false when the frame shouldn't be interpolated (a cut).
++bool BuildInterpolation(u64* matched_out, u64* total_out)
++{
++  s_interp_values = s_cur.values;
++  if (!s_have_prev)
++    return false;
++
++  // (address, count, signature) -> occurrences in the previous frame, in order.
++  std::unordered_map<u64, std::vector<u32>> prev_index;
++  prev_index.reserve(s_prev.events.size());
++  for (u32 i = 0; i < s_prev.events.size(); ++i)
++  {
++    const XFEvent& p = s_prev.events[i];
++    if (p.count == 0)
++      continue;
++    prev_index[Mix(Mix(p.address, p.count), p.signature)].push_back(i);
++  }
++
++  auto interesting = [](const XFEvent& e) {
++    return e.count != 0 &&
++           (e.address < XFMEM_LIGHTS_END ||
++            (e.address >= XFMEM_SETPROJECTION && e.address < XFMEM_SETPROJECTION + 7) ||
++            (e.address <= XFMEM_SETCHAN1_MATCOLOR &&
++             e.address + e.count > XFMEM_SETCHAN0_AMBCOLOR));
++  };
++
++  // Pass 1: strict signature.
++  std::vector<s32> partner(s_cur.events.size(), -1);
++  std::vector<bool> prev_used(s_prev.events.size(), false);
++  std::unordered_map<u64, u32> seen;
++  seen.reserve(prev_index.size());
++  u64 total = 0, matched = 0, moving = 0;
++  for (u32 k = 0; k < s_cur.events.size(); ++k)
++  {
++    const XFEvent& e = s_cur.events[k];
++    if (!interesting(e))
++      continue;
++    ++total;
++    const u64 key = Mix(Mix(e.address, e.count), e.signature);
++    const u32 occurrence = seen[key]++;
++    const auto it = prev_index.find(key);
++    if (it == prev_index.end() || occurrence >= it->second.size())
++      continue;
++    partner[k] = static_cast<s32>(it->second[occurrence]);
++    prev_used[it->second[occurrence]] = true;
++  }
++
++  // Pass 2: what's left, by the loose signature, in order.
++  std::unordered_map<u64, std::vector<u32>> loose_index;
++  for (u32 i = 0; i < s_prev.events.size(); ++i)
++  {
++    const XFEvent& p = s_prev.events[i];
++    if (!prev_used[i] && interesting(p))
++      loose_index[Mix(Mix(p.address, p.count), p.loose)].push_back(i);
++  }
++  std::unordered_map<u64, u32> loose_seen;
++  for (u32 k = 0; k < s_cur.events.size(); ++k)
++  {
++    const XFEvent& e = s_cur.events[k];
++    if (partner[k] >= 0 || !interesting(e))
++      continue;
++    const u64 key = Mix(Mix(e.address, e.count), e.loose);
++    const u32 occurrence = loose_seen[key]++;
++    const auto it = loose_index.find(key);
++    if (it == loose_index.end() || occurrence >= it->second.size())
++    {
++      if (s_debug_frame)
++        std::fprintf(stderr, "[interp] unmatched k=%u loose=%016llx addr=%03x n=%u sig=%016llx occ=%u\n", k, static_cast<unsigned long long>(e.loose), e.address,
++                     e.count, static_cast<unsigned long long>(e.signature), occurrence);
++      continue;
++    }
++    partner[k] = static_cast<s32>(it->second[occurrence]) | (1 << 30);
++  }
++
++  for (u32 k = 0; k < s_cur.events.size(); ++k)
++  {
++    if (partner[k] < 0)
++      continue;
++    ++matched;
++    if (Blend(s_cur.events[k], s_prev.events[partner[k] & ~(1 << 30)], (partner[k] >> 30) != 0))
++      ++moving;
++  }
++  *matched_out = matched;
++  *total_out = total;
++  // A cut (new scene, camera switch) leaves most matrix loads without a partner.
++  if (total >= 8 && matched * 10 < total * 6)
++    return false;
++  return true;
++}
++
++class ReplayCallback final : public OpcodeDecoder::Callback
++{
++public:
++  void OnXF(u16 address, u8 count, const u8* data) override
++  {
++    if (m_event < s_cur.events.size())
++    {
++      const XFEvent& e = s_cur.events[m_event++];
++      if (e.address == address && e.count == count)
++      {
++        LoadXFReg(address, count, reinterpret_cast<const u8*>(&s_interp_values[e.offset]));
++        return;
++      }
++    }
++    LoadXFReg(address, count, data);
++  }
++  void OnCP(u8 command, u32 value) override
++  {
++    const u8 sub_command = command & CP_COMMAND_MASK;
++    auto& system = Core::System::GetInstance();
++    if (sub_command == MATINDEX_A)
++    {
++      VertexLoaderManager::g_needs_cp_xf_consistency_check = true;
++      system.GetXFStateManager().SetTexMatrixChangedA(value);
++    }
++    else if (sub_command == MATINDEX_B)
++    {
++      VertexLoaderManager::g_needs_cp_xf_consistency_check = true;
++      system.GetXFStateManager().SetTexMatrixChangedB(value);
++    }
++    else if (sub_command == VCD_LO || sub_command == VCD_HI)
++    {
++      VertexLoaderManager::g_main_vat_dirty = BitSet8::AllTrue(CP_NUM_VAT_REG);
++      VertexLoaderManager::g_bases_dirty = true;
++      VertexLoaderManager::g_needs_cp_xf_consistency_check = true;
++    }
++    else if (sub_command == CP_VAT_REG_A || sub_command == CP_VAT_REG_B ||
++             sub_command == CP_VAT_REG_C)
++    {
++      VertexLoaderManager::g_main_vat_dirty[command & CP_VAT_MASK] = true;
++      VertexLoaderManager::g_needs_cp_xf_consistency_check = true;
++    }
++    else if (sub_command == ARRAY_BASE)
++    {
++      VertexLoaderManager::g_bases_dirty = true;
++    }
++    g_main_cp_state.LoadCPReg(command, value);
++  }
++  void OnBP(u8 command, u32 value) override { LoadBPReg(command, value, 0); }
++  void OnIndexedLoad(CPArray, u32, u16 address, u8 size) override
++  {
++    if (m_event >= s_cur.events.size())
++      return;
++    const XFEvent& e = s_cur.events[m_event++];
++    if (e.count != 0 && e.address == address && e.count == size)
++      LoadXFReg(address, size, reinterpret_cast<const u8*>(&s_interp_values[e.offset]));
++  }
++  void OnPrimitiveCommand(OpcodeDecoder::Primitive primitive, u8 vat, u32, u16 num_vertices,
++                          const u8* vertex_data) override
++  {
++    VertexLoaderManager::RunVertices<false>(vat, primitive, num_vertices, vertex_data);
++  }
++  void OnDisplayList(u32, u32) override {}  // display lists were recorded inline
++  void OnNop(u32) override {}
++  void OnUnknown(u8, const u8*) override {}
++  void OnCommand(const u8*, u32) override {}
++  CPState& GetCPState() override { return g_main_cp_state; }
++  u32 GetVertexSize(u8 vat) override
++  {
++    return VertexLoaderManager::RefreshLoader<false>(vat)->m_vertex_size;
++  }
++
++private:
++  size_t m_event = 0;
++};
++
++void UpdateHook()
++{
++  g_hook = g_recording || s_frame_end_pending;
++}
++
++void Replay()
++{
++  const auto start = std::chrono::steady_clock::now();
++  u64 matched = 0, total = 0;
++  const bool ok = BuildInterpolation(&matched, &total);
++  s_stat_events += total;
++  s_stat_matched += matched;
++  if (!ok)
++  {
++    ++s_stat_cuts;
++    return;
++  }
++
++  SaveGpuState(s_live_state);
++  LoadGpuState(s_start_state);
++
++  s_replay_result.reset();
++  g_replaying = true;
++  ReplayCallback callback;
++  OpcodeDecoder::Run(s_cur.commands.data(), static_cast<u32>(s_cur.commands.size()), callback);
++  g_vertex_manager->Flush();
++  g_replaying = false;
++
++  LoadGpuState(s_live_state);
++
++  if (s_replay_result)
++  {
++    Ready& slot = s_ready[s_ready_seq++ % s_ready.size()];
++    slot.addr = s_pending_xfb_addr;
++    slot.entry = std::move(s_replay_result);
++    ++s_stat_replayed;
++  }
++  s_stat_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
++                   .count();
++}
++
++void EndFrame()
++{
++  s_frame_end_pending = false;
++  const bool want = s_want_enabled.load(std::memory_order_relaxed);
++
++  if (!want)
++  {
++    Reset();
++    return;
++  }
++
++  // Whatever was waiting for this buffer is older than the frame just drawn into it.
++  DropReady(s_pending_xfb_addr);
++  if (g_recording && s_have_start)
++  {
++    static int debug_frames = 1;
++    s_debug_frame = s_log && s_stat_frames >= 1700 && debug_frames > 0;
++    if (s_debug_frame)
++      --debug_frames;
++    Replay();
++    if (s_log && ++s_stat_frames % 120 == 0)
++    {
++      std::fprintf(stderr,
++                   "[interp] frames=%u replayed=%u cuts=%u matched=%.1f%% avg=%.2f ms cmds=%zu KB\n",
++                   s_stat_frames, s_stat_replayed, s_stat_cuts,
++                   s_stat_events ? 100.0 * s_stat_matched / s_stat_events : 0.0,
++                   s_stat_replayed ? s_stat_ms / s_stat_replayed : 0.0, s_cur.commands.size() / 1024);
++      s_stat_replayed = s_stat_cuts = 0;
++      s_stat_events = s_stat_matched = 0;
++      s_stat_ms = 0;
++    }
++  }
++
++  // The live state now is where the next frame starts.
++  SaveGpuState(s_start_state);
++  s_have_start = true;
++  if (g_recording)
++  {
++    std::swap(s_prev, s_cur);
++    s_have_prev = true;
++  }
++  s_cur.Clear();
++  g_recording = true;
++  UpdateHook();
++}
++}  // namespace
++
++void SetEnabled(bool enabled)
++{
++  s_want_enabled.store(enabled, std::memory_order_relaxed);
++  static bool env_read = false;
++  if (!env_read)
++  {
++    env_read = true;
++    if (const char* t = std::getenv("COLO_INTERP_T"))
++      s_t = static_cast<float>(std::atof(t));
++    s_log = std::getenv("COLO_INTERP_LOG") != nullptr;
++  }
++}
++
++bool IsEnabled()
++{
++  return s_want_enabled.load(std::memory_order_relaxed);
++}
++
++void OnCommand(const u8* data, u32 size)
++{
++  if (g_recording && static_cast<OpcodeDecoder::Opcode>(data[0]) != OpcodeDecoder::Opcode::GX_CMD_CALL_DL)
++    s_cur.commands.insert(s_cur.commands.end(), data, data + size);
++  if (s_frame_end_pending)
++    EndFrame();
++}
++
++void RecordXF(u16 address, u8 count, const u8* big_endian_data)
++{
++  XFEvent e{address, count, static_cast<u32>(s_cur.values.size()), 0, 0};
++  if (big_endian_data == nullptr)
++  {
++    e.count = 0;
++  }
++  else
++  {
++    const size_t at = s_cur.values.size();
++    s_cur.values.resize(at + count);
++    std::memcpy(&s_cur.values[at], big_endian_data, count * sizeof(u32));
++  }
++  s_cur.events.push_back(e);
++}
++
++void RecordDraw(u8 cmd_byte, u16 num_vertices)
++{
++  if (s_cur.unsigned_from == s_cur.events.size())
++    return;
++  u64 loose = Mix(cmd_byte, g_main_cp_state.vtx_desc.low.Hex);
++  loose = Mix(loose, g_main_cp_state.vtx_desc.high.Hex);
++  // Vertex buffers the CPU rewrites every frame are often double-buffered, particle batches
++  // change size, and render-to-texture targets can alternate between two addresses, so those
++  // only go into the strict signature.
++  u64 sig = Mix(loose, num_vertices);
++  sig = Mix(sig, g_main_cp_state.array_bases[CPArray::Position]);
++  sig = Mix(sig, bpmem.tex.GetUnit(0).texImage3.image_base);
++  for (size_t i = s_cur.unsigned_from; i < s_cur.events.size(); ++i)
++  {
++    s_cur.events[i].signature = sig;
++    s_cur.events[i].loose = loose;
++  }
++  s_cur.unsigned_from = s_cur.events.size();
++}
++
++void OnLiveXFBCopy(u32 dest_addr)
++{
++  static const bool env_init = [] {
++    if (const char* e = std::getenv("COLO_INTERP"))
++      SetEnabled(e[0] == '1');
++    return true;
++  }();
++  (void)env_init;
++  if (!g_recording && !s_want_enabled.load(std::memory_order_relaxed))
++    return;
++  s_frame_end_pending = true;
++  s_pending_xfb_addr = dest_addr;
++  UpdateHook();
++}
++
++void OnReplayXFBCopy(std::shared_ptr<TCacheEntry> entry)
++{
++  s_replay_result = std::move(entry);
++}
++
++std::shared_ptr<TCacheEntry> TakeInterpolatedFrame(u32 xfb_addr)
++{
++  for (Ready& r : s_ready)
++  {
++    if (r.entry && r.addr == xfb_addr)
++      return std::move(r.entry);
++  }
++  return {};
++}
++
++void Reset()
++{
++  g_recording = false;
++  g_replaying = false;
++  s_frame_end_pending = false;
++  s_have_start = false;
++  s_have_prev = false;
++  s_cur.Clear();
++  s_prev.Clear();
++  for (Ready& r : s_ready)
++    r.entry.reset();
++  s_replay_result.reset();
++  UpdateHook();
++}
++}  // namespace FrameInterpolation
+diff --git a/Source/Core/VideoCommon/FrameInterpolation.h b/Source/Core/VideoCommon/FrameInterpolation.h
+new file mode 100644
+index 0000000..2d71195
+--- /dev/null
++++ b/Source/Core/VideoCommon/FrameInterpolation.h
+@@ -0,0 +1,52 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++// Geometric frame interpolation (Colosseum Native).
++//
++// Games whose logic is tied to the 60 Hz video interface can't simply run faster. Instead, every
++// frame's GPU command stream is recorded together with the GPU state it started from. When frame
++// N ends (its XFB copy), the frame is drawn a second time from that recorded stream with every
++// transform matrix, light and projection blended halfway between frame N-1 and frame N. The
++// result is a real, fully rendered in-between frame (no optical-flow guesswork), shown half a
++// video field before frame N, which doubles the presented frame rate.
++//
++// Matrix loads are matched between frames by address, by a signature of the draw that follows
++// them, and by occurrence; anything that can't be matched (new objects, CPU-animated vertices)
++// is drawn as in frame N. Camera cuts are detected and skip interpolation.
++//
++// Everything here runs on the GPU thread, except SetEnabled.
++
++#pragma once
++
++#include <memory>
++
++#include "Common/CommonTypes.h"
++
++struct TCacheEntry;
++
++namespace FrameInterpolation
++{
++// Any thread. Takes effect at the next frame boundary.
++void SetEnabled(bool enabled);
++bool IsEnabled();
++
++// GPU thread fast-path flags.
++extern bool g_recording;   // recording the current frame's commands
++extern bool g_hook;        // OnCommand must be called (recording, or a frame just ended)
++extern bool g_replaying;   // drawing the interpolated frame
++
++// Hooks from the live command processor.
++void OnCommand(const u8* data, u32 size);
++void RecordXF(u16 address, u8 count, const u8* big_endian_data);
++void RecordDraw(u8 cmd_byte, u16 num_vertices);
++void OnLiveXFBCopy(u32 dest_addr);
++
++// Result of the replayed XFB copy.
++void OnReplayXFBCopy(std::shared_ptr<TCacheEntry> entry);
++
++// Presenter: the in-between frame that goes before the XFB at xfb_addr, if there is one.
++std::shared_ptr<TCacheEntry> TakeInterpolatedFrame(u32 xfb_addr);
++
++// Drop all recorded state (savestate load, backend change).
++void Reset();
++}  // namespace FrameInterpolation
 diff --git a/Source/Core/VideoCommon/OnScreenUI.cpp b/Source/Core/VideoCommon/OnScreenUI.cpp
 index 451109b..9f95416 100644
 --- a/Source/Core/VideoCommon/OnScreenUI.cpp
@@ -209,3 +1035,260 @@ index e9a14e0..0354da1 100644
    void SetKeyMap(const DolphinKeyMap& key_map);
    void SetKey(u32 key, bool is_down, const char* chars);
    void SetMousePos(float x, float y);
+diff --git a/Source/Core/VideoCommon/OpcodeDecoding.cpp b/Source/Core/VideoCommon/OpcodeDecoding.cpp
+index fc6f896..05fa733 100644
+--- a/Source/Core/VideoCommon/OpcodeDecoding.cpp
++++ b/Source/Core/VideoCommon/OpcodeDecoding.cpp
+@@ -24,6 +24,7 @@
+ #include "VideoCommon/CommandProcessor.h"
+ #include "VideoCommon/DataReader.h"
+ #include "VideoCommon/Fifo.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/Statistics.h"
+ #include "VideoCommon/VertexLoaderBase.h"
+ #include "VideoCommon/VertexLoaderManager.h"
+@@ -44,6 +45,8 @@ public:
+ 
+     if constexpr (!is_preprocess)
+     {
++      if (FrameInterpolation::g_recording)
++        FrameInterpolation::RecordXF(address, count, data);
+       LoadXFReg(address, count, data);
+ 
+       INCSTAT(g_stats.this_frame.num_xf_loads);
+@@ -129,6 +132,12 @@ public:
+     // load vertices
+     const u32 size = vertex_size * num_vertices;
+ 
++    if constexpr (!is_preprocess)
++    {
++      if (FrameInterpolation::g_recording)
++        FrameInterpolation::RecordDraw(static_cast<u8>(primitive) << 3 | vat, num_vertices);
++    }
++
+     const u32 bytes =
+         VertexLoaderManager::RunVertices<is_preprocess>(vat, primitive, num_vertices, vertex_data);
+ 
+@@ -235,6 +244,8 @@ public:
+       {
+         Core::System::GetInstance().GetFifoRecorder().WriteGPCommand(data, size);
+       }
++      if (FrameInterpolation::g_hook)
++        FrameInterpolation::OnCommand(data, size);
+     }
+   }
+ 
+diff --git a/Source/Core/VideoCommon/Present.cpp b/Source/Core/VideoCommon/Present.cpp
+index 7c62730..b9b655e 100644
+--- a/Source/Core/VideoCommon/Present.cpp
++++ b/Source/Core/VideoCommon/Present.cpp
+@@ -17,6 +17,7 @@
+ #include "VideoCommon/AbstractGfx.h"
+ #include "VideoCommon/FrameDumper.h"
+ #include "VideoCommon/FramebufferManager.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/OnScreenUI.h"
+ #include "VideoCommon/PostProcessing.h"
+ #include "VideoCommon/VertexManagerBase.h"
+@@ -208,6 +209,21 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+ 
+   auto& video_events = GetVideoEvents();
+ 
++  // Frame interpolation: the in-between frame goes out at the field's time and the real frame
++  // half a field later, so both are on screen for the same length of time.
++  if (FrameInterpolation::IsEnabled())
++  {
++    const double rate = Core::System::GetInstance().GetVideoInterface().GetTargetRefreshRate();
++    const auto half = std::chrono::duration_cast<DT>(
++        std::chrono::duration<double>(0.5 / std::clamp(rate, 20.0, 240.0)));
++    present_info.intended_present_time = presentation_time + half;
++    if (!is_duplicate && m_xfb_entry)
++    {
++      if (const RcTcacheEntry interp = FrameInterpolation::TakeInterpolatedFrame(xfb_addr))
++        PresentInterpolated(interp, fb_width, fb_height, ticks, presentation_time);
++    }
++  }
++
+   video_events.before_present_event.Trigger(present_info);
+ 
+   if (!is_duplicate || !g_ActiveConfig.bSkipPresentingDuplicateXFBs)
+@@ -219,6 +235,43 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+   }
+ }
+ 
++void Presenter::PresentInterpolated(const RcTcacheEntry& entry, u32 fb_width, u32 fb_height,
++                                    u64 ticks, TimePoint when)
++{
++  if (entry->native_width == 0 || entry->native_height == 0)
++    return;
++  RcTcacheEntry real_entry = m_xfb_entry;
++  const MathUtil::Rectangle<int> real_rect = m_xfb_rect;
++  if (static const char* dump = std::getenv("COLO_INTERP_DUMP"); dump && real_entry)
++  {
++    static u32 n = 0;
++    if (n % 30 == 29)
++      real_entry->texture->Save(fmt::format("{}/f{:05}_prev.png", dump, n + 2), 0);
++    if (n++ % 30 == 0)
++    {
++      entry->texture->Save(fmt::format("{}/f{:05}_interp.png", dump, n), 0);
++      real_entry->texture->Save(fmt::format("{}/f{:05}_real.png", dump, n), 0);
++    }
++  }
++  m_xfb_entry = entry;
++  m_xfb_rect = MathUtil::Rectangle<int>(
++      0, 0, static_cast<int>(fb_width * entry->GetWidth() / entry->native_width),
++      static_cast<int>(fb_height * entry->GetHeight() / entry->native_height));
++
++  PresentInfo info{
++      .frame_count = m_frame_count > 0 ? m_frame_count - 1 : 0,
++      .present_count = m_present_count++,
++      .reason = PresentInfo::PresentReason::VideoInterfaceDuplicate,
++      .emulated_timestamp = ticks,
++      .intended_present_time = when,
++  };
++  Present(&info);
++  GetVideoEvents().after_present_event.Trigger(info);
++
++  m_xfb_entry = std::move(real_entry);
++  m_xfb_rect = real_rect;
++}
++
+ void Presenter::ImmediateSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height)
+ {
+   if (m_immediate_swap_happened_this_field.exchange(true, std::memory_order_relaxed) &&
+diff --git a/Source/Core/VideoCommon/Present.h b/Source/Core/VideoCommon/Present.h
+index 91ba870..e4ba9a2 100644
+--- a/Source/Core/VideoCommon/Present.h
++++ b/Source/Core/VideoCommon/Present.h
+@@ -110,6 +110,10 @@ public:
+   const MathUtil::Rectangle<int>& GetTargetRectangle() const { return m_target_rectangle; }
+ 
+ private:
++  // Frame interpolation: shows `entry` (an in-between frame) in place of the current XFB.
++  void PresentInterpolated(const RcTcacheEntry& entry, u32 fb_width, u32 fb_height, u64 ticks,
++                           TimePoint when);
++
+   // Fetches the XFB texture from the texture cache.
+   // Returns true the contents have changed since last time
+   bool FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height, u64 ticks);
+diff --git a/Source/Core/VideoCommon/TextureCacheBase.cpp b/Source/Core/VideoCommon/TextureCacheBase.cpp
+index c5d6096..a9303c5 100644
+--- a/Source/Core/VideoCommon/TextureCacheBase.cpp
++++ b/Source/Core/VideoCommon/TextureCacheBase.cpp
+@@ -2658,6 +2658,37 @@ void TextureCacheBase::UninitializeXFBMemory(u8* dst, u32 stride, u32 bytes_per_
+   }
+ }
+ 
++RcTcacheEntry TextureCacheBase::CopyXFBToPrivateEntry(
++    u32 width, u32 height, u32 dstStride, const MathUtil::Rectangle<int>& srcRect, float y_scale,
++    float gamma, bool clamp_top, bool clamp_bottom,
++    const CopyFilterCoefficients::Values& filter_coefficients)
++{
++  if (!g_backend_info.bSupportsCopyToVram || g_ActiveConfig.bDisableCopyToVRAM)
++    return {};
++
++  // Mirrors the copy_to_vram path of CopyRenderTargetToTexture for XFB copies.
++  const u32 scaled_tex_w = g_framebuffer_manager->EFBToScaledX(width);
++  const u32 scaled_tex_h = g_framebuffer_manager->EFBToScaledY(height);
++  const bool linear_filter = g_framebuffer_manager->GetEFBScale() != 1 || y_scale > 1.0f;
++  const TextureConfig config(scaled_tex_w, scaled_tex_h, 1, g_framebuffer_manager->GetEFBLayers(),
++                             1, AbstractTextureFormat::RGBA8, AbstractTextureFlag_RenderTarget,
++                             AbstractTextureType::Texture_2DArray);
++  RcTcacheEntry entry = AllocateCacheEntry(config);
++  if (!entry)
++    return {};
++
++  const TextureFormat base_format = TexDecoder_GetEFBCopyBaseFormat(EFBCopyFormat::XFB);
++  entry->SetGeneralParameters(0, 0, base_format, true);
++  entry->SetDimensions(width, height, 1);
++  entry->frameCount = FRAMECOUNT_INVALID;
++  entry->SetXfbCopy(std::max(dstStride, entry->BytesPerRow()));
++  entry->may_have_overlapping_textures = false;
++  entry->is_custom_tex = false;
++  CopyEFBToCacheEntry(entry, false, srcRect, false, linear_filter, EFBCopyFormat::XFB, false, gamma,
++                      clamp_top, clamp_bottom, GetVRAMCopyFilterCoefficients(filter_coefficients));
++  return entry;
++}
++
+ RcTcacheEntry TextureCacheBase::AllocateCacheEntry(const TextureConfig& config)
+ {
+   std::optional<TexPoolEntry> alloc = AllocateTexture(config);
+diff --git a/Source/Core/VideoCommon/TextureCacheBase.h b/Source/Core/VideoCommon/TextureCacheBase.h
+index d596f84..2f800f2 100644
+--- a/Source/Core/VideoCommon/TextureCacheBase.h
++++ b/Source/Core/VideoCommon/TextureCacheBase.h
+@@ -294,6 +294,13 @@ public:
+ 
+   void ScaleTextureCacheEntryTo(RcTcacheEntry& entry, u32 new_width, u32 new_height);
+ 
++  // Frame interpolation: an XFB copy of the current EFB into a texture that isn't tracked by
++  // address (nothing is written to guest RAM and no cached texture is invalidated).
++  RcTcacheEntry CopyXFBToPrivateEntry(u32 width, u32 height, u32 dstStride,
++                                      const MathUtil::Rectangle<int>& srcRect, float y_scale,
++                                      float gamma, bool clamp_top, bool clamp_bottom,
++                                      const CopyFilterCoefficients::Values& filter_coefficients);
++
+   // Flushes all pending EFB copies to emulated RAM.
+   void FlushEFBCopies();
+ 
+diff --git a/Source/Core/VideoCommon/VideoBackendBase.cpp b/Source/Core/VideoCommon/VideoBackendBase.cpp
+index 2a7aa1e..6f245b0 100644
+--- a/Source/Core/VideoCommon/VideoBackendBase.cpp
++++ b/Source/Core/VideoCommon/VideoBackendBase.cpp
+@@ -52,6 +52,7 @@
+ #include "VideoCommon/Fifo.h"
+ #include "VideoCommon/FrameDumper.h"
+ #include "VideoCommon/FramebufferManager.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/GeometryShaderManager.h"
+ #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
+ #include "VideoCommon/OnScreenDisplay.h"
+@@ -376,6 +377,7 @@ void VideoBackendBase::ShutdownShared()
+   auto& system = Core::System::GetInstance();
+   system.GetCustomResourceManager().Shutdown();
+ 
++  FrameInterpolation::Reset();  // holds texture cache entries
+   g_frame_dumper.reset();
+   g_presenter.reset();
+ 
+diff --git a/Source/Core/VideoCommon/VideoState.cpp b/Source/Core/VideoCommon/VideoState.cpp
+index 4b1892a..30678d2 100644
+--- a/Source/Core/VideoCommon/VideoState.cpp
++++ b/Source/Core/VideoCommon/VideoState.cpp
+@@ -12,6 +12,7 @@
+ #include "VideoCommon/CommandProcessor.h"
+ #include "VideoCommon/Fifo.h"
+ #include "VideoCommon/FrameDumper.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/FramebufferManager.h"
+ #include "VideoCommon/GeometryShaderManager.h"
+ #include "VideoCommon/PixelEngine.h"
+@@ -113,5 +114,6 @@ void VideoCommon_DoState(PointerWrap& p)
+     // Inform backend of new state from registers.
+     BPReload();
+     VertexLoaderManager::MarkAllDirty();
++    FrameInterpolation::Reset();
+   }
+ }
+diff --git a/Source/Core/VideoCommon/XFStructs.cpp b/Source/Core/VideoCommon/XFStructs.cpp
+index 4ac11c8..4dfc312 100644
+--- a/Source/Core/VideoCommon/XFStructs.cpp
++++ b/Source/Core/VideoCommon/XFStructs.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include "VideoCommon/XFStructs.h"
++#include "VideoCommon/FrameInterpolation.h"
+ 
+ #include <bit>
+ 
+@@ -277,6 +278,9 @@ void LoadIndexedXF(CPArray array, u32 index, u16 address, u8 size)
+         buf_size));
+   }
+ 
++  if (FrameInterpolation::g_recording)
++    FrameInterpolation::RecordXF(address, size, reinterpret_cast<const u8*>(newData));
++
+   auto& xf_state_manager = system.GetXFStateManager();
+   bool changed = false;
+   for (u32 i = 0; i < size; ++i)

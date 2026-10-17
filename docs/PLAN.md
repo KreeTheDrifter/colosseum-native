@@ -25,7 +25,7 @@ main.dol (no REL modules), 106 possible self-modifying-code sites to review.
    disc picker / drag-and-drop (ISO, GCM, CISO), runtime, game DLL. Vulkan and OpenGL;
    D3D11/12 later. Then the F1 menu and `ColosseumNative.ini`.
 3. **Graphics options** (below) wired to the menu with presets: Original, Balanced, High, Ultra.
-4. **144 fps:** decouple rendering from the 30/60 Hz game tick and interpolate (below).
+4. **120 fps:** done, by rendering interpolated in-between frames on the GPU side (below).
 5. **Android build:** arm64 build of the same code, Vulkan, touch controls, APK from GitHub Actions.
 6. **Full-game validation:** story, Mt. Battle, saves (memory card file), Snag Machine, battles, movies.
 
@@ -69,17 +69,35 @@ Recompiled code can't be patched in memory at run time, so code changes go into
 main.dol before recompiling; toggles in the settings need either separate code paths
 in the recompiled output or runtime checks added by our patches.
 
-## 144 fps approach
+## High frame rates (120 fps): GPU-side frame interpolation
 
-The game's logic must keep running at its original tick or everything speeds up.
-To present 144 new frames per second:
+Colosseum's subsystems advance by whole video fields (the frame dispatcher passes the
+integer field delta from `VIWaitForRetrace` to every update), so the logic tops out at
+60 Hz and a VI overclock just stalls it. Instead, the in-between frames are rendered
+inside Dolphin's VideoCommon (`patches/dolphin.patch`, `VideoCommon/FrameInterpolation.*`):
 
-1. Measure the game's tick and find its frame-advance routine in the recompiled code.
-2. Keep logic at the original rate; on each display refresh, render the scene with
-   camera, model, bone and particle transforms interpolated between the last two
-   logic ticks (the method used by the N64 recomp ports' high-frame-rate modes).
-3. Patch anything that assumes one draw per tick (UI counters, animated textures).
-4. "Frame generation off" keeps the original behaviour (repeat frames) as a fallback.
+1. Every frame's GPU command stream is recorded (display lists inlined), together with
+   a snapshot of the GPU state it started from (BP/CP/XF memory, TMEM, shader-manager
+   constants) and every XF load (immediate and indexed) with its values.
+2. At frame N's XFB copy, frame N is drawn a second time from the recording, with each
+   position/normal/texture/post matrix, light position/direction, projection and
+   material/ambient colour blended halfway towards frame N-1. Loads are matched between
+   frames by address, a signature of the next draw (primitive, vertex count, vertex
+   descriptor, position array, texture 0) and occurrence. Unmatched loads (new objects,
+   CPU-animated vertices) keep frame N's values; rotations over ~60° per frame and
+   scrolling-texture wrap-arounds are rejected; a frame with under 60% of its matrix
+   loads matched is a cut and isn't interpolated.
+3. The replay's side effects are suppressed (PE tokens, draw-done interrupts, bounding
+   box, end-of-frame events) and its XFB copy goes to a private texture, after which the
+   live state is restored. Replaying with t = 1 is pixel-identical to the real frame.
+4. The presenter shows the in-between frame at the field's time and the real frame half
+   a field later (`ViSwap`), so both get equal screen time: 120 frames per second, with
+   half a field (8 ms) of added latency. The in-between frame is matched to the XFB
+   address it precedes, because the VI shows each XFB one frame after it was drawn.
+
+Menu: Frame rate 30 / 60 / 120 (interpolated). 144 Hz displays show it best with
+VRR (FreeSync/G-Sync); fixed 144 Hz would need in-between frames at varying t, which
+is a later step. Not interpolated yet: TEV colour fades driven by BP registers.
 
 ## Delivery
 

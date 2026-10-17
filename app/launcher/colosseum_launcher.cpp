@@ -472,7 +472,7 @@ std::string ReadIni(const fs::path& path, const std::string& section, const std:
 GameSettings ReadGameSettings(const fs::path& user)
 {
   const fs::path file = user / "Config" / "ColosseumNative.ini";
-  EnsureIni(file, "Game", "FrameRate", "60   ; 60, or 30 for the original field frame rate");
+  EnsureIni(file, "Game", "FrameRate", "60   ; 60, 120 (60 + interpolated in-between frames, for 120 Hz+ screens) or 30 (original)");
   EnsureIni(file, "Game", "AspectRatio", "16:9   ; 4:3, 16:9, 16:10, 21:9 or 32:9");
   GameSettings s;
   s.fps60 = ReadIni(file, "Game", "FrameRate") != "30";

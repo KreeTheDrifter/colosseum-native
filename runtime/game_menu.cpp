@@ -33,6 +33,7 @@
 #include "Core/System.h"
 #include "InputCommon/ControllerInterface/ControllerInterface.h"
 #include "InputCommon/ControllerInterface/CoreDevice.h"
+#include "VideoCommon/FrameInterpolation.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/PostProcessing.h"
 #include "VideoCommon/Present.h"
@@ -143,12 +144,22 @@ void WriteGameOption(const std::string& key, const std::string& value)
   ini.Save(GameIniPath());
 }
 
-bool s_fps60 = true;
+// 0: 30 fps (original), 1: 60 fps, 2: 120 fps (60 + an interpolated frame between each pair).
+int s_fps_mode = 1;
+constexpr const char* kFpsValues[] = {"30", "60", "120"};
+constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps", "120 fps (interpolated)"};
+
+void ApplyInterpolation()
+{
+  FrameInterpolation::SetEnabled(s_fps_mode == 2);
+}
 int s_aspect = 1;  // index into kAspects
 
 void LoadGameOptions()
 {
-  s_fps60 = ReadGameOption("FrameRate", "60") != "30";
+  const std::string fps = ReadGameOption("FrameRate", "60");
+  s_fps_mode = fps == "30" ? 0 : fps == "120" ? 2 : 1;
+  ApplyInterpolation();
   const std::string aspect = ReadGameOption("AspectRatio", "16:9");
   for (size_t i = 0; i < kAspects.size(); ++i)
     if (aspect == kAspects[i].name)
@@ -166,7 +177,7 @@ void PokeGameSettings()
   u8* p = system.GetMemory().GetPointerForRange(kSettingsAddr, 8);
   if (!p)
     return;
-  p[0] = s_fps60 ? 0x00 : 0xFF;
+  p[0] = s_fps_mode == 0 ? 0xFF : 0x00;
   u32 bits;
   std::memcpy(&bits, &kAspects[s_aspect].multiplier, 4);
   p[4] = static_cast<u8>(bits >> 24);
@@ -335,10 +346,13 @@ std::vector<Item> BuildItems()
                    }});
 
   header("Game");
-  items.push_back({"Frame rate", s_fps60 ? "60 fps" : "30 fps (original)", false, false, [](int) {
-                     s_fps60 = !s_fps60;
-                     WriteGameOption("FrameRate", s_fps60 ? "60" : "30");
+  items.push_back({"Frame rate", kFpsLabels[s_fps_mode], false, false, [](int dir) {
+                     s_fps_mode = (s_fps_mode + (dir < 0 ? 2 : 1)) % 3;
+                     WriteGameOption("FrameRate", kFpsValues[s_fps_mode]);
                      PokeGameSettings();
+                     ApplyInterpolation();
+                     if (s_fps_mode == 2)
+                       SetStatus("120 fps needs a 120 Hz+ screen (or VSync off)");
                    }});
   items.push_back({"Aspect ratio", kAspects[s_aspect].name, false, false, [](int dir) {
                      s_aspect = Wrap(s_aspect + dir, kAspects);
