@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -341,6 +342,73 @@ void EnsureIni(const fs::path& path, const std::string& section, const std::stri
   WriteText(path, text);
 }
 
+// Controller profile for GameCube port 1. Xbox (and other XInput) controllers bind by
+// position: GameCube B is on Xbox X, GameCube X on Xbox B. Keyboard keys are bound in the
+// same profile through device-qualified controls, so either works at any time.
+// Version of the default profile below. Dolphin rewrites GCPadNew.ini on exit (dropping
+// comments), so the installed version is kept in User\Config\ColosseumNative.ini.
+constexpr int kPadProfileVersion = 1;
+
+void WriteControllerProfile(const fs::path& path)
+{
+  const fs::path state = path.parent_path() / "ColosseumNative.ini";
+  int installed = 0;
+  {
+    std::ifstream in(state);
+    for (std::string line; std::getline(in, line);)
+      if (line.rfind("PadProfile=", 0) == 0)
+        installed = std::atoi(line.c_str() + 11);
+  }
+  {
+    // Replace a missing or empty profile, or our own older default; keep anything else.
+    std::ifstream in(path);
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const bool configured = text.find("Device =") != std::string::npos;
+    if (configured && (installed == 0 || installed >= kPadProfileVersion))
+      return;
+  }
+  auto key = [](const char* k) {
+    return std::string("`DInput/0/Keyboard Mouse:") + k + "`";
+  };
+  auto both = [&](const char* pad, const char* k) {
+    return std::string("`") + pad + "` | " + key(k);
+  };
+  std::string p;
+  p += "[GCPad1]\n";
+  p += "Device = XInput/0/Gamepad\n";
+  p += "Buttons/A = " + both("Button A", "X") + "\n";
+  p += "Buttons/B = " + both("Button X", "C") + "\n";
+  p += "Buttons/X = " + both("Button B", "S") + "\n";
+  p += "Buttons/Y = " + both("Button Y", "D") + "\n";
+  p += "Buttons/Z = " + both("Shoulder R", "Z") + "\n";
+  p += "Buttons/Start = " + both("Start", "RETURN") + "\n";
+  p += "Main Stick/Up = " + both("Left Y+", "UP") + "\n";
+  p += "Main Stick/Down = " + both("Left Y-", "DOWN") + "\n";
+  p += "Main Stick/Left = " + both("Left X-", "LEFT") + "\n";
+  p += "Main Stick/Right = " + both("Left X+", "RIGHT") + "\n";
+  p += "Main Stick/Modifier = " + key("LSHIFT") + "\n";
+  p += "Main Stick/Modifier/Range = 50.0\n";
+  p += "Main Stick/Dead Zone = 10.0\n";
+  p += "C-Stick/Up = " + both("Right Y+", "I") + "\n";
+  p += "C-Stick/Down = " + both("Right Y-", "K") + "\n";
+  p += "C-Stick/Left = " + both("Right X-", "J") + "\n";
+  p += "C-Stick/Right = " + both("Right X+", "L") + "\n";
+  p += "C-Stick/Dead Zone = 10.0\n";
+  p += "Triggers/L = " + both("Trigger L", "Q") + "\n";
+  p += "Triggers/R = " + both("Trigger R", "W") + "\n";
+  p += "Triggers/L-Analog = " + both("Trigger L", "Q") + "\n";
+  p += "Triggers/R-Analog = " + both("Trigger R", "W") + "\n";
+  p += "Triggers/Threshold = 90.0\n";
+  p += "D-Pad/Up = " + both("Pad N", "T") + "\n";
+  p += "D-Pad/Down = " + both("Pad S", "G") + "\n";
+  p += "D-Pad/Left = " + both("Pad W", "F") + "\n";
+  p += "D-Pad/Right = " + both("Pad E", "H") + "\n";
+  p += "Rumble/Motor = `Motor L` | `Motor R`\n";
+  p += "[GCPad2]\n[GCPad3]\n[GCPad4]\n";
+  WriteText(path, p);
+  WriteText(state, "[Launcher]\nPadProfile=" + std::to_string(kPadProfileVersion) + "\n");
+}
+
 // Default settings. Whole files are written only when missing; required keys are added
 // to existing files without touching anything the player changed.
 void WriteDefaultSettings(const fs::path& user)
@@ -389,6 +457,8 @@ void WriteDefaultSettings(const fs::path& user)
   // Shadow Pokemon cutscenes.
   EnsureIni(gfx, "Settings", "SafeTextureCacheColorSamples", "0");
   EnsureIni(gfx, "Settings", "CPUCull", "True");
+
+  WriteControllerProfile(user / "Config" / "GCPadNew.ini");
 
   // Memory card: a standard formatted card file in User\GC (Dolphin .raw format).
   const fs::path dolphin = user / "Config" / "Dolphin.ini";
