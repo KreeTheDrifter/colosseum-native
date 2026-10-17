@@ -600,6 +600,7 @@ void WriteDefaultSettings(const fs::path& user)
 {
   fs::create_directories(user / "Config");
   fs::create_directories(user / "GC");
+  fs::create_directories(user / "StateSaves");  // menu save states (Dolphin won't create it)
   // First-run quality from the graphics card (the in-game menu has presets to change it):
   // integrated graphics 2x / no MSAA, mid-range 3x / 2x MSAA, high-end 4x / 4x MSAA.
   const bool first_run = !fs::exists(user / "config.ini") || !fs::exists(user / "Config" / "GFX.ini");

@@ -431,6 +431,8 @@ std::vector<Item> BuildItems()
   items.push_back({"State slot", fmt::format("{}", s_state_slot), false, false,
                    [](int dir) { s_state_slot = std::clamp(s_state_slot + dir, 1, 9); }});
   items.push_back({"Save state", "", false, true, [](int) {
+                     // Dolphin doesn't create the folder itself; without it the save fails.
+                     File::CreateFullPath(File::GetUserPath(D_STATESAVES_IDX));
                      State::Save(Core::System::GetInstance(), s_state_slot);
                      SetStatus(fmt::format("Saved state {}", s_state_slot));
                    }});
