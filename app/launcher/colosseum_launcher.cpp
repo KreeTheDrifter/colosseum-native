@@ -287,12 +287,17 @@ void WriteDefaultSettings(const fs::path& user)
   fs::create_directories(user / "Config");
   if (!fs::exists(user / "config.ini"))
   {
+    // Vulkan is fastest; fall back to OpenGL on PCs without a Vulkan driver.
+    const HMODULE vulkan = LoadLibraryW(L"vulkan-1.dll");
+    const char* backend = vulkan ? "Vulkan" : "OGL";
+    if (vulkan)
+      FreeLibrary(vulkan);
     WriteText(user / "config.ini",
               "# ModernGekko frontend settings\n"
               "# resolution is the internal render size: 640x528 times 1-12.\n"
               "[Video]\n"
               "resolution=2560x2112\n"
-              "backend=Vulkan\n"
+              "backend=" + std::string(backend) + "\n"
               "fullscreen=false\n"
               "show_fps_in_title=true\n"
               "[Input]\n");
@@ -307,7 +312,7 @@ void WriteDefaultSettings(const fs::path& user)
               "SSAA = False\n"
               "EnablePixelLighting = True\n"
               "ShaderCompilationMode = 2\n"
-              "WaitForShadersBeforeStarting = True\n"
+              "WaitForShadersBeforeStarting = False\n"
               "HiresTextures = True\n"
               "[Enhancements]\n"
               "MaxAnisotropy = 4\n"
