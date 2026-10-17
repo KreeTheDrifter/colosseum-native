@@ -93,7 +93,14 @@ bool Run(const std::string& cmd)
 {
   std::printf("  > %s\n", cmd.c_str());
   std::fflush(stdout);
+#ifdef _WIN32
+  // system() runs "cmd /c <command>", and cmd drops the first and last quote when the
+  // command starts with one (a quoted program path), which breaks the line. An extra
+  // pair of quotes around the whole command is what cmd expects.
+  return std::system(("\"" + cmd + "\"").c_str()) == 0;
+#else
   return std::system(cmd.c_str()) == 0;
+#endif
 }
 
 fs::path ExeDir(const char* argv0)
