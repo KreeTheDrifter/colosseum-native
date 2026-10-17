@@ -1,0 +1,211 @@
+diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+index 3402fda..71f1fca 100644
+--- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+@@ -26,6 +26,7 @@
+ #include <thread>
+ 
+ #include "VideoCommon/Present.h"
++#include "game_menu.hpp"
+ #include "resource.h"
+ 
+ namespace
+@@ -275,6 +276,13 @@ bool PlatformWin32::Init()
+     SetThreadExecutionState(ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED);
+ 
+   UpdateWindowPosition();
++
++  // In-game menu actions that touch the window run on the window thread.
++  moderngekko::menu::SetHostHooks({
++      [hwnd = m_hwnd] { PostMessage(hwnd, WM_APP + 1, 0, 0); },
++      [this] { return m_fullscreen; },
++      [this] { RequestShutdown(); },
++  });
+   return true;
+ }
+ 
+@@ -349,8 +357,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+     if (hwnd)
+     {
+       // Remove rounded corners from the render window on Windows 11
+-      constexpr DWM_WINDOW_CORNER_PREFERENCE corner_preference = DWMWCP_DONOTROUND;
+-      DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner_preference,
++      // Raw values (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1) so older
++      // MinGW headers without the Windows 11 enums still build.
++      constexpr DWORD corner_preference = 1;
++      DwmSetWindowAttribute(hwnd, 33, &corner_preference,
+                             sizeof(corner_preference));
+     }
+   }
+@@ -363,37 +373,54 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+   }
+   break;
+ 
++  case WM_APP + 1:
++    platform->ToggleFullscreen();
++    return 0;
++
+   case WM_KEYDOWN:
+-    // Bit 30 of lParam is the previous key state: ignore auto-repeat, or holding
+-    // F1 down would write a state every few milliseconds.
+-    if (wParam == VK_F1 && (static_cast<ULONG_PTR>(lParam) & (1u << 30)) == 0)
++  {
++    // Bit 30 of lParam is the previous key state: ignore auto-repeat for toggles.
++    const bool repeat = (static_cast<ULONG_PTR>(lParam) & (1u << 30)) != 0;
++    using moderngekko::menu::Key;
++    // Esc / F1: in-game settings menu (Esc no longer quits; use the menu's Quit).
++    if ((wParam == VK_ESCAPE || wParam == VK_F1) && !repeat)
+     {
+-      platform->SaveStateToStatesDirectory();
++      moderngekko::menu::OnKey(moderngekko::menu::IsOpen() ? Key::Back : Key::Toggle);
+       return 0;
+     }
+-    else if (wParam == VK_SPACE)
++    if (moderngekko::menu::IsOpen())
+     {
+-      Config::SetCurrent(Config::MAIN_EMULATION_SPEED, FAST_FORWARD_SPEED);
+-      return 0;
++      switch (wParam)
++      {
++      case VK_UP: moderngekko::menu::OnKey(Key::Up); return 0;
++      case VK_DOWN: moderngekko::menu::OnKey(Key::Down); return 0;
++      case VK_LEFT: moderngekko::menu::OnKey(Key::Left); return 0;
++      case VK_RIGHT: moderngekko::menu::OnKey(Key::Right); return 0;
++      case VK_RETURN: case VK_SPACE: if (!repeat) moderngekko::menu::OnKey(Key::Accept); return 0;
++      case VK_BACK: if (!repeat) moderngekko::menu::OnKey(Key::Back); return 0;
++      default: return 0;
++      }
+     }
+-    else if (wParam == VK_F11)
++    if (wParam == VK_F5 && !repeat)
+     {
+-      platform->ToggleFullscreen();
++      platform->SaveStateToStatesDirectory();
+       return 0;
+     }
+-    else if (wParam == VK_ESCAPE && platform->m_fullscreen)
++    else if (wParam == VK_TAB)
+     {
+-      platform->ToggleFullscreen();
++      Config::SetCurrent(Config::MAIN_EMULATION_SPEED, FAST_FORWARD_SPEED);
+       return 0;
+     }
+-    else if (wParam == VK_ESCAPE)
++    else if (wParam == VK_F11)
+     {
+-      platform->RequestShutdown();
++      platform->ToggleFullscreen();
++      return 0;
+     }
+     break;
++  }
+ 
+   case WM_KEYUP:
+-    if (wParam == VK_SPACE)
++    if (wParam == VK_TAB)
+     {
+       Config::SetCurrent(Config::MAIN_EMULATION_SPEED, 1.0f);
+       return 0;
+diff --git a/Source/Core/DolphinNoGUI/PlatformX11.cpp b/Source/Core/DolphinNoGUI/PlatformX11.cpp
+index 8d0ae0c..f4a5bb3 100644
+--- a/Source/Core/DolphinNoGUI/PlatformX11.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformX11.cpp
+@@ -27,6 +27,7 @@ static constexpr auto X_None = None;
+ #include "UICommon/UICommon.h"
+ #include "UICommon/X11Utils.h"
+ #include "VideoCommon/Present.h"
++#include "game_menu.hpp"
+ 
+ #ifndef HOST_NAME_MAX
+ #define HOST_NAME_MAX _POSIX_HOST_NAME_MAX
+@@ -138,6 +139,11 @@ bool PlatformX11::Init()
+   }
+ 
+   UpdateWindowPosition();
++  moderngekko::menu::SetHostHooks({
++      nullptr,
++      [this] { return m_window_fullscreen; },
++      [this] { RequestShutdown(); },
++  });
+   return true;
+ }
+ 
+@@ -192,6 +198,24 @@ void PlatformX11::ProcessEvents()
+     {
+     case KeyPress:
+       key = XLookupKeysym((XKeyEvent*)&event, 0);
++      {
++        using moderngekko::menu::Key;
++        if (key == XK_Escape || key == XK_F1)
++        {
++          moderngekko::menu::OnKey(moderngekko::menu::IsOpen() ? Key::Back : Key::Toggle);
++          break;
++        }
++        if (moderngekko::menu::IsOpen())
++        {
++          if (key == XK_Up) moderngekko::menu::OnKey(Key::Up);
++          else if (key == XK_Down) moderngekko::menu::OnKey(Key::Down);
++          else if (key == XK_Left) moderngekko::menu::OnKey(Key::Left);
++          else if (key == XK_Right) moderngekko::menu::OnKey(Key::Right);
++          else if (key == XK_Return || key == XK_space) moderngekko::menu::OnKey(Key::Accept);
++          else if (key == XK_BackSpace) moderngekko::menu::OnKey(Key::Back);
++          break;
++        }
++      }
+       if (key == XK_Escape && (event.xkey.state & ControlMask))
+       {
+         RequestShutdown();
+diff --git a/Source/Core/VideoCommon/OnScreenUI.cpp b/Source/Core/VideoCommon/OnScreenUI.cpp
+index 451109b..9f95416 100644
+--- a/Source/Core/VideoCommon/OnScreenUI.cpp
++++ b/Source/Core/VideoCommon/OnScreenUI.cpp
+@@ -413,6 +413,16 @@ void OnScreenUI::DrawChallengesAndLeaderboards()
+ #endif  // USE_RETRO_ACHIEVEMENTS
+ }
+ 
++namespace
++{
++std::function<void()> s_overlay_hook;
++}
++
++void OnScreenUI::SetOverlayHook(std::function<void()> hook)
++{
++  s_overlay_hook = std::move(hook);
++}
++
+ void OnScreenUI::Finalize()
+ {
+   auto lock = GetImGuiLock();
+@@ -422,6 +432,8 @@ void OnScreenUI::Finalize()
+   DrawDebugText();
+   OSD::DrawMessages();
+   DrawChallengesAndLeaderboards();
++  if (s_overlay_hook)
++    s_overlay_hook();
+   ImGui::Render();
+ 
+   // Check for font changes
+diff --git a/Source/Core/VideoCommon/OnScreenUI.h b/Source/Core/VideoCommon/OnScreenUI.h
+index e9a14e0..0354da1 100644
+--- a/Source/Core/VideoCommon/OnScreenUI.h
++++ b/Source/Core/VideoCommon/OnScreenUI.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include <functional>
++
+ #include <map>
+ #include <memory>
+ #include <mutex>
+@@ -55,6 +57,10 @@ public:
+   void Finalize();
+ 
+   // Receive keyboard and mouse from QT
++  // Extra ImGui drawing each frame (e.g. a frontend's in-game menu), run inside the frame
++  // just before it is rendered.
++  static void SetOverlayHook(std::function<void()> hook);
++
+   void SetKeyMap(const DolphinKeyMap& key_map);
+   void SetKey(u32 key, bool is_down, const char* chars);
+   void SetMousePos(float x, float y);

@@ -29,10 +29,13 @@ T="$work/template"
 if [ ! -d "$T/lib/ModernGekko/vendor/dolphin/Source" ]; then
   git config --global url."https://github.com/libarchive/bzip2.git".insteadOf "https://gitlab.com/bzip2/bzip2.git"
   git clone --recursive --depth 1 --shallow-submodules https://github.com/ExpansionPak/ModernGekko-Template.git "$T"
-  (cd "$T/lib/ModernGekko" && git apply "$here/patches/moderngekko-0001-mingw-jthread.patch")
-  (cd "$T/lib/ModernGekko/vendor/dolphin" && git apply "$here/patches/dolphin-0001-mingw-dwm-corner.patch")
+  # MinGW build fixes, in-game menu hooks (overlay, input routing, input gate).
+  (cd "$T/lib/ModernGekko" && git apply "$here/patches/moderngekko.patch")
+  (cd "$T/lib/ModernGekko/vendor/dolphin" && git apply "$here/patches/dolphin.patch")
 fi
 MG="$T/lib/ModernGekko"
+mkdir -p "$MG/src/frontend"
+cp "$here/runtime/game_menu.cpp" "$here/runtime/game_menu.hpp" "$MG/src/frontend/"
 
 # 3. Case aliases: the code includes <Windows.h> etc.; MinGW ships lowercase names.
 export CASE_SHIM="$work/case-shim"; rm -rf "$CASE_SHIM"; mkdir -p "$CASE_SHIM"
@@ -70,5 +73,6 @@ cmake --build "$work/module-win" -j"$jobs"
 
 cp "$work/runtime-win/moderngekko-run.exe" "$out/"
 rm -rf "$out/Sys"; cp -r "$MG/vendor/dolphin/Data/Sys" "$out/Sys"   # game settings, GC fonts, DSP ROMs
+cp "$here/app/shaders/"*.glsl "$out/Sys/Shaders/"                     # FidelityFX CAS / FSR 1
 cp "$work/module-win/gGC6E01_recomp.dll" "$out/"
 echo "built: $out"

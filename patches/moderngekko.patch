@@ -1,0 +1,70 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c0548a0..f15e4fa 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -241,6 +241,7 @@ target_link_libraries(moderngekko PUBLIC ModernGekko::ABI PRIVATE fmt::fmt)
+ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+     target_sources(moderngekko PRIVATE
+         src/runtime/dolphin_runtime.cpp
++        src/frontend/game_menu.cpp
+         tools/automation_protocol.cpp
+         vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
+         vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
+@@ -249,7 +250,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+         target_sources(moderngekko PRIVATE
+             vendor/dolphin/Source/Core/InputCommon/ControllerInterface/Touch/InputOverrider.cpp)
+     endif()
+-    target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
++    target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools"
++        "${CMAKE_CURRENT_SOURCE_DIR}/src/frontend")
++    # In-game menu draws with Dolphin's ImGui.
++    target_link_libraries(moderngekko PRIVATE imgui)
+     if(WIN32)
+         target_sources(moderngekko PRIVATE
+             vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWin32.cpp)
+@@ -1056,3 +1060,15 @@ if(BUILD_TESTING)
+     add_test(NAME moderngekko.dolphin_shader
+              COMMAND moderngekko_dolphin_shader_test)
+ endif()
++
++# Colosseum Native: libc++ (llvm-mingw) keeps std::jthread/stop_token behind
++# -fexperimental-library; enable it only for the files that use them.
++if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++    set_source_files_properties(src/runtime/dolphin_runtime.cpp tools/moderngekko_run.cpp
++        tools/moderngekko_launcher.cpp PROPERTIES COMPILE_OPTIONS "-fexperimental-library")
++    foreach(t moderngekko moderngekko-run moderngekko-launcher)
++        if(TARGET ${t})
++            target_link_options(${t} PUBLIC -fexperimental-library)
++        endif()
++    endforeach()
++endif()
+diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
+index f9b5405..cfdc359 100644
+--- a/src/runtime/dolphin_runtime.cpp
++++ b/src/runtime/dolphin_runtime.cpp
+@@ -41,6 +41,8 @@
+ #include <cstdlib>
+ #include <fstream>
+ #include <fmt/format.h>
++#include "VideoCommon/OnScreenUI.h"
++#include "game_menu.hpp"
+ #include <mutex>
+ #include <stop_token>
+ #include <thread>
+@@ -113,7 +115,7 @@ PowerPC::CPUCore SelectCPUCore() {
+ std::vector<std::string> Host_GetPreferredLocales() { return {}; }
+ void Host_PPCSymbolsChanged() {}
+ void Host_PPCBreakpointsChanged() {}
+-bool Host_UIBlocksControllerState() { return false; }
++bool Host_UIBlocksControllerState() { return moderngekko::menu::IsOpen(); }
+ void Host_Message(HostMessageID id) {
+   if (id == HostMessageID::WMUserStop && s_platform)
+     s_platform->Stop();
+@@ -782,6 +784,7 @@ RuntimeRunResult Runtime::Run() {
+         if (state == Core::State::Uninitialized && m_impl->platform)
+           m_impl->platform->Stop();
+       });
++  VideoCommon::OnScreenUI::SetOverlayHook(moderngekko::menu::Draw);
+   if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot),
+                              m_impl->platform->GetWindowSystemInfo())) {
+     m_impl->running = false;
