@@ -281,10 +281,72 @@ void Unpack(Disc& disc, const std::vector<uint8_t>& dol, const fs::path& root)
   fs::rename(partial, root);
 }
 
-// Default settings, written only when the files do not exist yet.
+// Sets key=value under [section] in a Dolphin-style ini, but only when the key is not
+// there yet, so later builds can add required settings without undoing user edits.
+void EnsureIni(const fs::path& path, const std::string& section, const std::string& key,
+               const std::string& value)
+{
+  std::vector<std::string> lines;
+  {
+    std::ifstream in(path);
+    for (std::string line; std::getline(in, line);)
+    {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      lines.push_back(line);
+    }
+  }
+  auto trim = [](std::string t) {
+    const auto b = t.find_first_not_of(" \t");
+    const auto e = t.find_last_not_of(" \t");
+    return b == std::string::npos ? std::string() : t.substr(b, e - b + 1);
+  };
+  const std::string header = "[" + section + "]";
+  size_t insert_at = lines.size();
+  bool in_section = false, found_section = false;
+  for (size_t i = 0; i < lines.size(); ++i)
+  {
+    const std::string t = trim(lines[i]);
+    if (!t.empty() && t.front() == '[')
+    {
+      if (in_section)
+        break;
+      in_section = (t == header);
+      if (in_section)
+      {
+        found_section = true;
+        insert_at = i + 1;
+      }
+      continue;
+    }
+    if (in_section)
+    {
+      if (const auto eq = t.find('='); eq != std::string::npos && trim(t.substr(0, eq)) == key)
+        return;  // already set; keep the user's value
+      if (!t.empty())
+        insert_at = i + 1;
+    }
+  }
+  const std::string entry = key + " = " + value;
+  if (found_section)
+    lines.insert(lines.begin() + std::ptrdiff_t(insert_at), entry);
+  else
+  {
+    lines.push_back(header);
+    lines.push_back(entry);
+  }
+  std::string text;
+  for (const auto& line : lines)
+    text += line + "\n";
+  WriteText(path, text);
+}
+
+// Default settings. Whole files are written only when missing; required keys are added
+// to existing files without touching anything the player changed.
 void WriteDefaultSettings(const fs::path& user)
 {
   fs::create_directories(user / "Config");
+  fs::create_directories(user / "GC");
   if (!fs::exists(user / "config.ini"))
   {
     // Vulkan is fastest; fall back to OpenGL on PCs without a Vulkan driver.
@@ -302,9 +364,11 @@ void WriteDefaultSettings(const fs::path& user)
               "show_fps_in_title=true\n"
               "[Input]\n");
   }
-  if (!fs::exists(user / "Config" / "GFX.ini"))
+
+  const fs::path gfx = user / "Config" / "GFX.ini";
+  if (!fs::exists(gfx))
   {
-    WriteText(user / "Config" / "GFX.ini",
+    WriteText(gfx,
               "[Settings]\n"
               "AspectRatio = 0\n"
               "wideScreenHack = True\n"
@@ -320,6 +384,17 @@ void WriteDefaultSettings(const fs::path& user)
               "ForceTrueColor = True\n"
               "DisableCopyFilter = True\n");
   }
+  // From Dolphin's GC6E01 game settings: the game rewrites its font texture in place,
+  // so the fast texture cache shows stale or garbled text; and CPU culling speeds up
+  // Shadow Pokemon cutscenes.
+  EnsureIni(gfx, "Settings", "SafeTextureCacheColorSamples", "0");
+  EnsureIni(gfx, "Settings", "CPUCull", "True");
+
+  // Memory card: a standard formatted card file in User\GC (Dolphin .raw format).
+  const fs::path dolphin = user / "Config" / "Dolphin.ini";
+  EnsureIni(dolphin, "Core", "SlotA", "1");
+  EnsureIni(dolphin, "Core", "SlotB", "255");
+  EnsureIni(dolphin, "Core", "MemcardAPath", (user / "GC" / "MemoryCardA.USA.raw").string());
 }
 
 fs::path PickDisc()
@@ -387,6 +462,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
   const fs::path module = here / "gGC6E01_recomp.dll";
   const fs::path game = here / "Game";
   const fs::path user = here / "User";
+  if (!fs::is_directory(here / "Sys"))
+    Fail(L"The Sys folder is missing. Keep all files from the download together in one folder.");
 
   if (!fs::exists(runtime) || !fs::exists(module))
     Fail(L"moderngekko-run.exe or gGC6E01_recomp.dll is missing. Keep all files from "
@@ -418,11 +495,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
   std::wstring cmd = L"\"" + runtime.wstring() + L"\" --game \"" + game.wstring() +
                      L"\" --module \"" + module.wstring() + L"\" --user-dir \"" +
                      user.wstring() + L"\" --title \"Pok\u00e9mon Colosseum\"";
+  // The runtime is a console program: hide its console and keep its output in a log.
+  SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
+  const fs::path log_path = user / "ColosseumNative.log";
+  HANDLE log = CreateFileW(log_path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, nullptr);
   STARTUPINFOW si{};
   si.cb = sizeof(si);
+  if (log != INVALID_HANDLE_VALUE)
+  {
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = log;
+    si.hStdError = log;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  }
   PROCESS_INFORMATION pi{};
-  if (!CreateProcessW(runtime.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr,
-                      here.c_str(), &si, &pi))
+  const BOOL started = CreateProcessW(runtime.c_str(), cmd.data(), nullptr, nullptr, TRUE,
+                                      CREATE_NO_WINDOW, nullptr, here.c_str(), &si, &pi);
+  if (log != INVALID_HANDLE_VALUE)
+    CloseHandle(log);
+  if (!started)
     Fail(L"The game could not be started (error " + std::to_wstring(GetLastError()) + L").");
   CloseHandle(pi.hThread);
   WaitForSingleObject(pi.hProcess, INFINITE);

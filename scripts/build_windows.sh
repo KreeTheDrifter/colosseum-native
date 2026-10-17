@@ -7,6 +7,7 @@
 #   ColosseumNative.exe   launcher (asks for the disc on first run, unpacks it)
 #   moderngekko-run.exe   ModernGekko runtime
 #   gGC6E01_recomp.dll    recompiled Pokemon Colosseum (USA) code
+#   Sys\                  Dolphin data (GC6E01 game settings, GameCube fonts)
 #
 # Needs: cmake, ninja, python3, git. Downloads llvm-mingw and ModernGekko-Template.
 set -euo pipefail
@@ -68,5 +69,6 @@ cmake --build "$work/module-win" -j"$jobs"
   -o "$out/ColosseumNative.exe"
 
 cp "$work/runtime-win/moderngekko-run.exe" "$out/"
+rm -rf "$out/Sys"; cp -r "$MG/vendor/dolphin/Data/Sys" "$out/Sys"   # game settings, GC fonts, DSP ROMs
 cp "$work/module-win/gGC6E01_recomp.dll" "$out/"
 echo "built: $out"
