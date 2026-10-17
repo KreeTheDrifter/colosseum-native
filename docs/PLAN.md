@@ -88,7 +88,9 @@ inside Dolphin's VideoCommon (`patches/dolphin.patch`, `VideoCommon/FrameInterpo
    scrolling-texture wrap-arounds are rejected; a frame with under 60% of its matrix
    loads matched is a cut and isn't interpolated.
 3. The replay's side effects are suppressed (PE tokens, draw-done interrupts, bounding
-   box, end-of-frame events) and its XFB copy goes to a private texture, after which the
+   box, end-of-frame events, and EFB copies: an EFB copy zeroes its destination in guest
+   RAM, and by replay time the CPU, a frame ahead, may have reused that memory; test 7/8
+   crashed on area loads because of it. The replay samples frame N's copies instead) and its XFB copy goes to a private texture, after which the
    live state is restored. Replaying with t = 1 is pixel-identical to the real frame.
 4. The presenter shows the in-between frame at the field's time and the real frame half
    a field later (`ViSwap`), so both get equal screen time: 120 frames per second, with

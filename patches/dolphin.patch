@@ -181,10 +181,20 @@ index 8d0ae0c..f4a5bb3 100644
        {
          RequestShutdown();
 diff --git a/Source/Core/VideoCommon/BPStructs.cpp b/Source/Core/VideoCommon/BPStructs.cpp
-index 180bc86..a131800 100644
+index 180bc86..62d2ab6 100644
 --- a/Source/Core/VideoCommon/BPStructs.cpp
 +++ b/Source/Core/VideoCommon/BPStructs.cpp
-@@ -25,6 +25,7 @@
+@@ -3,6 +3,9 @@
+ 
+ #include "VideoCommon/BPStructs.h"
+ 
++#include <cstdio>
++#include <cstdlib>
++
+ #include <algorithm>
+ #include <cstring>
+ #include <string>
+@@ -25,6 +28,7 @@
  #include "VideoCommon/BoundingBox.h"
  #include "VideoCommon/Fifo.h"
  #include "VideoCommon/FramebufferManager.h"
@@ -192,7 +202,7 @@ index 180bc86..a131800 100644
  #include "VideoCommon/GeometryShaderManager.h"
  #include "VideoCommon/OpcodeDecoding.h"
  #include "VideoCommon/PerfQueryBase.h"
-@@ -178,6 +179,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -178,6 +182,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
    // Triggers an interrupt on the PPC side so that the game knows when the GPU has finished drawing.
    // Tokens are similar.
    case BPMEM_SETDRAWDONE:
@@ -201,7 +211,7 @@ index 180bc86..a131800 100644
      switch (bp.newvalue & 0xFF)
      {
      case 0x02:
-@@ -201,6 +204,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -201,6 +207,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
      return;
    case BPMEM_PE_TOKEN_ID:  // Pixel Engine Token ID
    {
@@ -210,7 +220,7 @@ index 180bc86..a131800 100644
      INCSTAT(g_stats.this_frame.num_token);
      g_texture_cache->FlushEFBCopies();
      g_texture_cache->FlushStaleBinds();
-@@ -217,6 +222,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -217,6 +225,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
    }
    case BPMEM_PE_TOKEN_INT_ID:  // Pixel Engine Interrupt Token ID
    {
@@ -219,7 +229,25 @@ index 180bc86..a131800 100644
      INCSTAT(g_stats.this_frame.num_token_int);
      g_texture_cache->FlushEFBCopies();
      g_texture_cache->FlushStaleBinds();
-@@ -335,6 +342,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -303,6 +313,17 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+       // Check if we are to copy from the EFB or draw to the XFB
+       if (PE_copy.copy_to_xfb == 0)
+       {
++        // The in-between frame must never write guest RAM: an EFB copy zeroes (or fills)
++        // its destination, and by the time frame N is replayed the game may already be
++        // using that memory for something else (it crashed on area loads). The textures
++        // frame N copied are still in the cache, so the replay simply uses those.
++        if (FrameInterpolation::g_replaying)
++        {
++          if (std::getenv("COLO_INTERP_EFBLOG"))
++            std::fprintf(stderr, "[interp] replay EFB copy dest=%08x %ux%u stride=%u\n", destAddr,
++                         copy_width, copy_height, destStride);
++          goto after_copy;
++        }
+         // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from
+         // ZBuffer (Zbuffer uses 24-bit Format)
+         bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
+@@ -335,6 +356,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
                        destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
                        bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
  
@@ -236,7 +264,7 @@ index 180bc86..a131800 100644
          bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
          g_texture_cache->CopyRenderTargetToTexture(
              destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
-@@ -351,6 +368,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -351,6 +382,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
          // memory so they form a single completed XFB. See
          // https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
          system.GetVideoEvents().after_frame_event.Trigger(system);
@@ -244,7 +272,7 @@ index 180bc86..a131800 100644
  
          // Note: Theoretically, in the future we could track the VI configuration and try to detect
          //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
-@@ -371,6 +389,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -371,9 +403,11 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
              vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
            }
          }
@@ -252,7 +280,11 @@ index 180bc86..a131800 100644
        }
      }
  
-@@ -519,6 +538,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
++  after_copy:
+     // Clear the rectangular region after copying it.
+     if (PE_copy.clear)
+     {
+@@ -519,6 +553,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
    case BPMEM_CLEARBBOX1:
    case BPMEM_CLEARBBOX2:
    {
