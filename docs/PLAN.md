@@ -21,7 +21,9 @@ main.dol (no REL modules), 106 possible self-modifying-code sites to review.
 1. ~~**Boot (Linux):** runtime + recompiled code reach the title screen.~~ Done 2026-10-16:
    Genius Sonority logo, intro, title screen; 1,667 frames, 0 interpreter fallbacks,
    0 failed SMC checks. Needs a window (headless + Vulkan trips an ImGui assert).
-2. **Windows build:** single-file exe, Vulkan / D3D12 / D3D11, F1 menu, disc picker, `ColosseumNative.ini`.
+2. **Windows build:** cross-compiled with llvm-mingw (`scripts/build_windows.sh`): launcher with
+   disc picker / drag-and-drop (ISO, GCM, CISO), runtime, game DLL. Vulkan and OpenGL;
+   D3D11/12 later. Then the F1 menu and `ColosseumNative.ini`.
 3. **Graphics options** (below) wired to the menu with presets: Original, Balanced, High, Ultra.
 4. **144 fps:** decouple rendering from the 30/60 Hz game tick and interpolate (below).
 5. **Android build:** arm64 build of the same code, Vulkan, touch controls, APK from GitHub Actions.
@@ -47,6 +49,25 @@ Most of these map directly to Dolphin's VideoConfig, which ModernGekko embeds
 `bHDR`, `iShaderCompilationMode`, …). Widescreen without stretching and higher-
 resolution shadows need patches to the recompiled game code (camera projection,
 HUD placement, shadow render-target size).
+
+## Leads from Dolphin's GC6E01 game settings
+
+Dolphin's `Data/Sys/GameSettings/GC6E01.ini` (vendored in ModernGekko) carries:
+
+- **Memory-card save fix** (`0x801CFC2C`, `0x801CFC7C`): baked into main.dol by
+  `tools/disc.py patch-dol`, as ModernGekko's port tool does.
+- **"16:9 Widescreen"** Action Replay code: a code cave at `0x80005300`, a branch at
+  `0x800A3930`, and the aspect constant `0x8047E724 = 4/3·(4/3)`. The code parts can be
+  baked into main.dol; the constant lives outside the DOL's data sections and needs a
+  runtime write or a patch to the code that loads it.
+- **"60 FPS [Nerdzilla]"**: `0x80005D98 = li r3,0`. Colosseum normally runs at 30 fps;
+  this is the starting point for high frame rates (game logic at 60, then interpolate
+  to 120/144). Must be checked for game-speed side effects.
+- `CPUCull = True` for Shadow Pokémon cutscenes (performance).
+
+Recompiled code can't be patched in memory at run time, so code changes go into
+main.dol before recompiling; toggles in the settings need either separate code paths
+in the recompiled output or runtime checks added by our patches.
 
 ## 144 fps approach
 

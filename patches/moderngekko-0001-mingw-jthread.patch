@@ -1,0 +1,20 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c0548a0..e503c6c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1056,3 +1056,15 @@ if(BUILD_TESTING)
+     add_test(NAME moderngekko.dolphin_shader
+              COMMAND moderngekko_dolphin_shader_test)
+ endif()
++
++# Colosseum Native: libc++ (llvm-mingw) keeps std::jthread/stop_token behind
++# -fexperimental-library; enable it only for the files that use them.
++if(MINGW AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
++    set_source_files_properties(src/runtime/dolphin_runtime.cpp tools/moderngekko_run.cpp
++        tools/moderngekko_launcher.cpp PROPERTIES COMPILE_OPTIONS "-fexperimental-library")
++    foreach(t moderngekko moderngekko-run moderngekko-launcher)
++        if(TARGET ${t})
++            target_link_options(${t} PUBLIC -fexperimental-library)
++        endif()
++    endforeach()
++endif()

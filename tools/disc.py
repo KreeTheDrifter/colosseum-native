@@ -4,12 +4,46 @@
   disc.py ciso2iso <in.ciso> <out.iso>
   disc.py verify   <game.iso>
   disc.py extract  <game.iso> <outdir>     -> outdir/sys/main.dol, outdir/files/...
+  disc.py patch-dol <main.dol> <out.dol>   bake the code patches below into main.dol
 """
 import hashlib, os, struct, sys
 
 GC_DISC_SIZE = 1_459_978_240
 GAME_ID = b"GC6E01"
 MAIN_DOL_SHA1 = "870e8b9693ca780782d80f22a6a4572d8ba9458f"  # USA rev 0
+
+
+# Code patches baked into main.dol before recompiling: (address, original word, new word).
+# Recompiled code can't be patched in memory at run time, so fixes must go in here.
+DOL_PATCHES = [
+    # Dolphin GameSettings GC6E01 "Allow Memory Card saving with Savestates" (enabled by
+    # default there and in ModernGekko's port tool). Without it, saving after loading a
+    # save state can be refused as a different memory card.
+    (0x801CFC2C, 0x418100AC, 0x9005002C),  # store the card's save counter instead of comparing
+    (0x801CFC7C, 0x4082005C, 0x60000000),  # nop the second "same card" check
+]
+
+
+def dol_offset(dol, address):
+    offs = struct.unpack(">18I", dol[0:72])
+    addrs = struct.unpack(">18I", dol[0x48:0x90])
+    sizes = struct.unpack(">18I", dol[0x90:0xD8])
+    for o, a, n in zip(offs, addrs, sizes):
+        if n and a <= address < a + n:
+            return o + address - a
+    raise ValueError(f"{address:#x} is not in main.dol")
+
+
+def patch_dol(src, dst):
+    dol = bytearray(open(src, "rb").read())
+    for address, old, new in DOL_PATCHES:
+        at = dol_offset(dol, address)
+        cur = struct.unpack(">I", dol[at:at + 4])[0]
+        if cur not in (old, new):
+            sys.exit(f"unexpected word {cur:#010x} at {address:#x}; is this the USA main.dol?")
+        dol[at:at + 4] = struct.pack(">I", new)
+    open(dst, "wb").write(dol)
+    print(f"patched {len(DOL_PATCHES)} words -> {dst}")
 
 
 def ciso2iso(src, dst):
@@ -95,7 +129,8 @@ def extract(iso, out):
 
 
 if __name__ == "__main__":
-    cmds = {"ciso2iso": (ciso2iso, 2), "verify": (verify, 1), "extract": (extract, 2)}
+    cmds = {"ciso2iso": (ciso2iso, 2), "verify": (verify, 1), "extract": (extract, 2),
+            "patch-dol": (patch_dol, 2)}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds or len(sys.argv) - 2 != cmds[sys.argv[1]][1]:
         sys.exit(__doc__)
     cmds[sys.argv[1]][0](*sys.argv[2:])

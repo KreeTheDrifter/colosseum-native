@@ -1,0 +1,17 @@
+diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+index 3402fda..31a3868 100644
+--- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
++++ b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
+@@ -349,8 +349,10 @@ LRESULT PlatformWin32::WndProc(const HWND hwnd, const UINT msg, const WPARAM wPa
+     if (hwnd)
+     {
+       // Remove rounded corners from the render window on Windows 11
+-      constexpr DWM_WINDOW_CORNER_PREFERENCE corner_preference = DWMWCP_DONOTROUND;
+-      DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner_preference,
++      // Raw values (DWMWA_WINDOW_CORNER_PREFERENCE = 33, DWMWCP_DONOTROUND = 1) so older
++      // MinGW headers without the Windows 11 enums still build.
++      constexpr DWORD corner_preference = 1;
++      DwmSetWindowAttribute(hwnd, 33, &corner_preference,
+                             sizeof(corner_preference));
+     }
+   }
