@@ -156,7 +156,7 @@ bool IsBaseTexture(const fs::path& p)
 }
 }  // namespace
 
-int main(int argc, char** argv)
+int Main(int argc, char** argv)
 {
   int scale = 4;
   std::string model = "realesrgan-x4plus-anime";
@@ -294,4 +294,19 @@ int main(int argc, char** argv)
               "Turn on \"HD texture packs\" in the game's menu (on by default) and restart the game.\n",
               done, mips_written, secs);
   return 0;
+}
+
+int main(int argc, char** argv)
+{
+  const int rc = Main(argc, argv);
+#ifdef _WIN32
+  // Double-clicked (no arguments): keep the console window open to read the result.
+  if (argc == 1)
+  {
+    std::printf("\nPress Enter to close.");
+    std::fflush(stdout);
+    std::getchar();
+  }
+#endif
+  return rc;
 }
