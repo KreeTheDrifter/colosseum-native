@@ -7,8 +7,10 @@ with [DolRecomp](https://github.com/ExpansionPak/DolRecomp) and runs on the
 highest-fidelity way to play it: high internal resolution, MSAA/SSAA, 16× anisotropic
 filtering, widescreen and ultrawide, texture packs, and up to 144 fps.
 
-**Status: early.** The full main.dol recompiles (623,456 instructions, 0 unknown).
-Next milestone: first boot. See [docs/PLAN.md](docs/PLAN.md).
+**Status: boots to the title screen.** The full main.dol recompiles (623,456
+instructions, 0 unknown) and runs entirely as native code (0 interpreter fallbacks,
+0 failed self-modifying-code checks) through the Genius Sonority logo and intro to
+PRESS START. See [docs/PLAN.md](docs/PLAN.md).
 
 You need your own copy: **Pokémon Colosseum (USA), `GC6E01`**, as ISO or CISO.
 No game data is included in or downloaded by this repository.

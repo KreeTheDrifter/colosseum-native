@@ -18,7 +18,9 @@ main.dol (no REL modules), 106 possible self-modifying-code sites to review.
 
 ## Milestones
 
-1. **Boot (Linux, headless):** runtime + recompiled code reach the title screen; frame count verified.
+1. ~~**Boot (Linux):** runtime + recompiled code reach the title screen.~~ Done 2026-10-16:
+   Genius Sonority logo, intro, title screen; 1,667 frames, 0 interpreter fallbacks,
+   0 failed SMC checks. Needs a window (headless + Vulkan trips an ImGui assert).
 2. **Windows build:** single-file exe, Vulkan / D3D12 / D3D11, F1 menu, disc picker, `ColosseumNative.ini`.
 3. **Graphics options** (below) wired to the menu with presets: Original, Balanced, High, Ultra.
 4. **144 fps:** decouple rendering from the 30/60 Hz game tick and interpolate (below).
