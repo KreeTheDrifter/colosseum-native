@@ -118,11 +118,15 @@ Measured on the Linux build, Null renderer, uncapped, from a gameplay save state
 | No mod-hook checks when no mods are loaded; game ID read every 256 slices | 51 |
 | + idle-loop skip at 0x800FEB9C | 75 |
 
-- **Idle loop.** A background thread spins in a polling loop (0x800FEA90 to 0x800FEB9C,
+- **Idle loop (off by default since build 8b).** A background thread spins in a polling loop (0x800FEA90 to 0x800FEB9C,
   disable interrupts, walk a list, re-enable) whenever the game waits for the next
   field. `StaticRecompIdlePC = 0x800FEB9C` makes the dispatcher hand the rest of the
   time slice back to CoreTiming at that back-edge, which cuts emulated work by about 4x.
-  Gameplay, area loads and the interpolation tests are unchanged with it on.
+  Gameplay, area loads and the interpolation tests are unchanged with it on here, but
+  the player's PC soft-locked after an area change with it (and 120 fps) on: the main
+  thread entered VIWaitForRetrace with interrupts disabled and the VI CoreTiming event
+  was missing from the queue, so no retrace ever woke it. Cause not yet found; a
+  watchdog in the StaticRecomp loop now re-adds a missing VI event and logs it.
 - **Startup.** The runtime no longer SHA-256s every file on the disc (over 1 GB, twice)
   at each start; nothing in the runtime used that hash.
 - **First-run quality** follows the graphics card (DXGI dedicated memory): integrated

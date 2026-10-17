@@ -674,7 +674,9 @@ void WriteDefaultSettings(const fs::path& user)
   // whenever the game waits for the next video field. Treating its back-edge as idle lets
   // the emulated clock skip ahead instead of burning the CPU: same game behaviour, far
   // less CPU time (frees the processor for rendering; cooler and longer battery on laptops).
-  EnsureIni(dolphin, "Core", "StaticRecompIdlePC", "2148527004", true);
+  // Off while a soft-lock seen with test build 8 is investigated (the game stopped getting
+  // video interrupts after an area change). Set to 2148527004 (0x800FEB9C) to try it.
+  EnsureIni(dolphin, "Core", "StaticRecompIdlePC", "0", true);
 }
 
 fs::path PickDisc()

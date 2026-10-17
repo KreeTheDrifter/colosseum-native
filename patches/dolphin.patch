@@ -1,17 +1,129 @@
+diff --git a/Source/Core/Core/CoreTiming.cpp b/Source/Core/Core/CoreTiming.cpp
+index 26e9973..acebb5b 100644
+--- a/Source/Core/Core/CoreTiming.cpp
++++ b/Source/Core/Core/CoreTiming.cpp
+@@ -311,6 +311,11 @@ void CoreTimingManager::RemoveEvent(EventType* event_type)
+   }
+ }
+ 
++bool CoreTimingManager::IsEventScheduled(EventType* event_type) const
++{
++  return std::ranges::any_of(m_event_queue, [&](const Event& e) { return e.type == event_type; });
++}
++
+ void CoreTimingManager::RemoveAllEvents(EventType* event_type)
+ {
+   MoveEvents();
+diff --git a/Source/Core/Core/CoreTiming.h b/Source/Core/Core/CoreTiming.h
+index 29d636e..cfb11c0 100644
+--- a/Source/Core/Core/CoreTiming.h
++++ b/Source/Core/Core/CoreTiming.h
+@@ -122,6 +122,8 @@ public:
+ 
+   // We only permit one event of each type in the queue at a time.
+   void RemoveEvent(EventType* event_type);
++  // CPU thread. Whether an event of this type is waiting in the queue.
++  bool IsEventScheduled(EventType* event_type) const;
+   void RemoveAllEvents(EventType* event_type);
+ 
+   // Advance must be called at the beginning of dispatcher loops, not the end. Advance() ends
+diff --git a/Source/Core/Core/HW/SystemTimers.cpp b/Source/Core/Core/HW/SystemTimers.cpp
+index 461b65b..d2412ce 100644
+--- a/Source/Core/Core/HW/SystemTimers.cpp
++++ b/Source/Core/Core/HW/SystemTimers.cpp
+@@ -125,6 +125,15 @@ void SystemTimersManager::VICallback(Core::System& system, u64 userdata, s64 cyc
+                             system.GetSystemTimers().m_event_type_vi);
+ }
+ 
++bool SystemTimersManager::EnsureVIEventScheduled()
++{
++  auto& core_timing = m_system.GetCoreTiming();
++  if (!m_event_type_vi || core_timing.IsEventScheduled(m_event_type_vi))
++    return false;
++  core_timing.ScheduleEvent(m_system.GetVideoInterface().GetTicksPerHalfLine(), m_event_type_vi);
++  return true;
++}
++
+ void SystemTimersManager::DecrementerCallback(Core::System& system, u64 userdata, s64 cycles_late)
+ {
+   auto& ppc_state = system.GetPPCState();
+diff --git a/Source/Core/Core/HW/SystemTimers.h b/Source/Core/Core/HW/SystemTimers.h
+index b0002c4..c1dfdeb 100644
+--- a/Source/Core/Core/HW/SystemTimers.h
++++ b/Source/Core/Core/HW/SystemTimers.h
+@@ -69,6 +69,10 @@ public:
+   u32 GetTicksPerSecond() const;
+   void PreInit();
+   void Init();
++  // The video-interface event reschedules itself every half line. If it is ever missing,
++  // the game never sees another retrace interrupt and soft-locks (seen in Colosseum
++  // Native). Called periodically from the CPU thread; puts it back and returns true.
++  bool EnsureVIEventScheduled();
+   void Shutdown();
+   void ChangePPCClock(Mode mode);
+ 
+diff --git a/Source/Core/Core/HW/VideoInterface.h b/Source/Core/Core/HW/VideoInterface.h
+index 6bf762a..60de51a 100644
+--- a/Source/Core/Core/HW/VideoInterface.h
++++ b/Source/Core/Core/HW/VideoInterface.h
+@@ -353,6 +353,11 @@ union UVIHorizontalStepping
+ class VideoInterfaceManager
+ {
+ public:
++  u32 DebugInterruptRegister(int i) const { return m_interrupt_register[i].Hex; }
++  u32 DebugHalfLines() const { return GetHalfLinesPerEvenField() + GetHalfLinesPerOddField(); }
++  u32 DebugHalfLine() const { return m_half_line_count; }
++  u32 DebugHLW() const { return m_h_timing_0.HLW; }
++  u32 DebugDCR() const { return m_display_control_register.Hex; }
+   explicit VideoInterfaceManager(Core::System& system);
+   VideoInterfaceManager(const VideoInterfaceManager&) = delete;
+   VideoInterfaceManager(VideoInterfaceManager&&) = delete;
 diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
-index d91ec2d..2fc4510 100644
+index d91ec2d..4e9c880 100644
 --- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
 +++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
-@@ -117,11 +117,18 @@ void StaticRecompCore::Run()
+@@ -1,3 +1,5 @@
++#include "Core/HW/VideoInterface.h"
++#include "Core/HW/ProcessorInterface.h"
+ // RecompCore: StaticRecomp CPU core - Main execution loop.
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+@@ -117,11 +119,44 @@ void StaticRecompCore::Run()
      return;
    }
  
 +  u32 game_id_check = 0;
++  u32 vi_watchdog = 0;
    while (*state_ptr == CPU::State::Running)
    {
      core_timing.Advance();
 -    const std::string current_game_id = SConfig::GetInstance().GetGameID();
 -    m_module_active = m_module && (current_game_id.empty() || current_game_id == m_module->game_id);
++    if ((++vi_watchdog & 4095u) == 0 && m_system.GetSystemTimers().EnsureVIEventScheduled())
++    {
++      std::fprintf(stderr,
++                   "[staticrecomp] VI event was missing (pc=%08x lr=%08x ticks=%llu); restored\n",
++                   ppc.pc, ppc.spr[SPR_LR], static_cast<unsigned long long>(core_timing.GetTicks()));
++    }
++    if (static const bool irq_debug = std::getenv("COLO_DEBUG_IRQ") != nullptr; irq_debug)
++    {
++      static u32 n = 0;
++      if ((++n % 20000) == 0)
++      {
++        auto& pi = m_system.GetProcessorInterface();
++        auto& vi = m_system.GetVideoInterface();
++        std::fprintf(stderr,
++                     "[irq] pc=%08x msr=%08x exc=%08x pi_cause=%08x pi_mask=%08x vi_di=%08x %08x %08x %08x hl=%u/%u hlw=%u dcr=%04x\n",
++                     ppc.pc, ppc.msr.Hex, ppc.Exceptions, pi.GetCause(), pi.GetMask(),
++                     vi.DebugInterruptRegister(0), vi.DebugInterruptRegister(1),
++                     vi.DebugInterruptRegister(2), vi.DebugInterruptRegister(3), vi.DebugHalfLine(),
++                     vi.DebugHalfLines(), vi.DebugHLW(), vi.DebugDCR());
++        if ((n % 200000) == 0)
++          std::fprintf(stderr, "[irq] ticks=%llu\n%s\n",
++                       static_cast<unsigned long long>(core_timing.GetTicks()),
++                       core_timing.GetScheduledEventsSummary().c_str());
++      }
++    }
 +    // The game ID only changes on a title switch; reading it copies a string under a lock, so
 +    // don't do it on every timing slice.
 +    if ((++game_id_check & 255u) == 1u)
