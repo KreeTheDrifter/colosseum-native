@@ -23,24 +23,64 @@ DOL_PATCHES = [
     (0x801CFC2C, 0x418100AC, 0x9005002C),  # store the card's save counter instead of comparing
     (0x801CFC7C, 0x4082005C, 0x60000000),  # nop the second "same card" check
 
-    # Native 16:9. C_MTXPerspective (0x800A3910) copies its aspect argument with
-    # "fmr f29, f2" and divides by it for m[0][0]. Replace that copy with a call to a
-    # small new leaf function in zeroed padding at 0x80005300 that returns
-    # f29 = f2 * 4/3, so every 3D camera renders 16:9 (from Dolphin's "16:9 Widescreen"
-    # code, reworked as a plain call because recompiled code can't jump into the middle
-    # of another function, and with the 4/3 constant stored in the DOL itself).
+    # Settings-driven widescreen. C_MTXPerspective (0x800A3910) copies its aspect
+    # argument with "fmr f29, f2" and divides by it for m[0][0]. That copy becomes a call
+    # to a leaf in zeroed padding at 0x80005300 returning f29 = f2 * <aspect multiplier
+    # from the settings block>, so every 3D camera renders at the chosen aspect ratio
+    # (1.0 = original 4:3). Reworked from Dolphin's "16:9 Widescreen" code: a plain call
+    # instead of a jump into the middle of a function, and a runtime setting.
     (0x800A3930, 0xFFA01090, 0x4BF619D1),  # fmr f29,f2  ->  bl 0x80005300
     (0x80005300, 0x00000000, 0x3D808000),  # lis   r12, 0x8000
-    (0x80005304, 0x00000000, 0xC3AC5310),  # lfs   f29, 0x5310(r12)   (4/3)
+    (0x80005304, 0x00000000, 0xC3AC1804),  # lfs   f29, 0x1804(r12)   (aspect multiplier)
     (0x80005308, 0x00000000, 0xEFA20772),  # fmuls f29, f2, f29
     (0x8000530C, 0x00000000, 0x4E800020),  # blr
-    (0x80005310, 0x00000000, 0x3FAAAAAB),  # .float 1.3333334
 
-    # 60 fps everywhere. The end-of-frame routine passes the field's frame-interval
-    # flag (1 = wait for two retraces = 30 fps) to the frame limiter at 0x800D361C;
-    # pass 0 (60 fps, as menus already use). From Dolphin's "60 FPS [Nerdzilla]".
-    (0x80005D98, 0x886D85B0, 0x38600000),  # lbz r3,-0x7a50(r13) -> li r3,0
+    # Settings-driven frame rate. The end-of-frame routine passes the field's
+    # frame-interval flag (1 = wait two retraces = 30 fps) to the frame limiter at
+    # 0x800D361C. Route it through a leaf that ANDs it with the settings block's mask:
+    # 0x00 -> always 0 (60 fps, as menus already run), 0xFF -> the game's own value.
+    # From Dolphin's "60 FPS [Nerdzilla]" (which forces 0).
+    (0x80005D98, 0x886D85B0, 0x4BFFF579),  # lbz r3,-0x7a50(r13) -> bl 0x80005310
+    (0x80005310, 0x00000000, 0x886D85B0),  # lbz r3, -0x7a50(r13)   (game's flag)
+    (0x80005314, 0x00000000, 0x3D808000),  # lis r12, 0x8000
+    (0x80005318, 0x00000000, 0x880C1800),  # lbz r0, 0x1800(r12)    (frame-rate mask)
+    (0x8000531C, 0x00000000, 0x7C630038),  # and r3, r3, r0
+    (0x80005320, 0x00000000, 0x4E800020),  # blr
 ]
+
+# Settings block read by the patched code, added to main.dol as an extra data section
+# at 0x80001800 (low memory GameCube games leave free for debuggers). ModernGekko only
+# verifies code ranges, so the launcher can rewrite these bytes without rebuilding.
+SETTINGS_ADDR = 0x80001800
+SETTINGS_SIZE = 0x20
+FPS_MASK_60 = 0x00        # +0x0 u8: 0x00 = 60 fps everywhere, 0xFF = original 30/60
+FPS_MASK_ORIGINAL = 0xFF
+ASPECTS = {"4:3": 1.0, "16:9": 4 / 3, "16:10": 1.2, "21:9": 1.75, "32:9": 8 / 3}  # +0x4 f32
+
+
+def settings_block(fps60=True, aspect="16:9"):
+    block = bytearray(SETTINGS_SIZE)
+    block[0] = FPS_MASK_60 if fps60 else FPS_MASK_ORIGINAL
+    block[4:8] = struct.pack(">f", ASPECTS[aspect])
+    return bytes(block)
+
+
+def set_settings_section(dol, block):
+    """Add (or update) the settings data section in a DOL image."""
+    addrs = struct.unpack(">18I", dol[0x48:0x90])
+    sizes = struct.unpack(">18I", dol[0x90:0xD8])
+    for i in range(7, 18):
+        if addrs[i] == SETTINGS_ADDR and sizes[i] == SETTINGS_SIZE:
+            at = struct.unpack(">I", dol[i * 4:i * 4 + 4])[0]
+            dol[at:at + SETTINGS_SIZE] = block
+            return
+    slot = next(i for i in range(7, 18) if sizes[i] == 0)
+    dol.extend(bytes(-len(dol) % 0x20))
+    at = len(dol)
+    dol.extend(block)
+    struct.pack_into(">I", dol, slot * 4, at)
+    struct.pack_into(">I", dol, 0x48 + slot * 4, SETTINGS_ADDR)
+    struct.pack_into(">I", dol, 0x90 + slot * 4, SETTINGS_SIZE)
 
 
 def dol_offset(dol, address):
@@ -61,8 +101,9 @@ def patch_dol(src, dst):
         if cur not in (old, new):
             sys.exit(f"unexpected word {cur:#010x} at {address:#x}; is this the USA main.dol?")
         dol[at:at + 4] = struct.pack(">I", new)
+    set_settings_section(dol, settings_block())
     open(dst, "wb").write(dol)
-    print(f"patched {len(DOL_PATCHES)} words -> {dst}")
+    print(f"patched {len(DOL_PATCHES)} words + settings block -> {dst}")
 
 
 def patches_h(dst):
@@ -73,6 +114,14 @@ def patches_h(dst):
              "inline constexpr DolPatch kDolPatches[] = {"]
     for a, old, new in DOL_PATCHES:
         lines.append(f"    {{0x{a:08X}u, 0x{old:08X}u, 0x{new:08X}u}},")
+    lines.append("};")
+    lines += ["", f"inline constexpr uint32_t kSettingsAddr = 0x{SETTINGS_ADDR:08X}u;",
+              f"inline constexpr uint32_t kSettingsSize = 0x{SETTINGS_SIZE:X}u;",
+              f"inline constexpr uint8_t kFpsMask60 = 0x{FPS_MASK_60:02X}u;",
+              f"inline constexpr uint8_t kFpsMaskOriginal = 0x{FPS_MASK_ORIGINAL:02X}u;",
+              "struct AspectChoice { const char* name; float multiplier; };",
+              "inline constexpr AspectChoice kAspects[] = {"]
+    lines += [f'    {{"{k}", {v!r}f}},' for k, v in ASPECTS.items()]
     lines.append("};")
     open(dst, "w").write("\n".join(lines) + "\n")
     print(f"wrote {len(DOL_PATCHES)} patches -> {dst}")

@@ -224,36 +224,74 @@ size_t DolOffset(const std::vector<uint8_t>& dol, uint32_t address)
   return SIZE_MAX;
 }
 
-enum class DolState { Original, Patched, Unknown };
-
-// The recompiled code was built from main.dol with kDolPatches applied (widescreen,
-// 60 fps, memory-card fix); the game must boot that exact DOL.
-DolState CheckDol(const std::vector<uint8_t>& dol)
+void Put32(std::vector<uint8_t>& d, size_t at, uint32_t v)
 {
-  bool all_new = true;
+  d[at] = uint8_t(v >> 24);
+  d[at + 1] = uint8_t(v >> 16);
+  d[at + 2] = uint8_t(v >> 8);
+  d[at + 3] = uint8_t(v);
+}
+
+// Undo any version of our patches: original words back at every patch site and the
+// settings section removed. For a genuine USA main.dol (patched or not) the result
+// hashes to kMainDolSha1; anything else is a modified or damaged file.
+std::vector<uint8_t> RestoreOriginalDol(std::vector<uint8_t> dol)
+{
+  if (dol.size() < 0x100)
+    return {};
+  for (int i = 7; i < 18; ++i)
+  {
+    if (be32(&dol[0x48 + i * 4]) == kSettingsAddr)
+    {
+      Put32(dol, i * 4, 0);
+      Put32(dol, 0x48 + i * 4, 0);
+      Put32(dol, 0x90 + i * 4, 0);
+    }
+  }
+  uint32_t end = 0;
+  for (int i = 0; i < 18; ++i)
+    if (be32(&dol[0x90 + i * 4]))
+      end = std::max(end, be32(&dol[i * 4]) + be32(&dol[0x90 + i * 4]));
+  if (end > dol.size())
+    return {};
+  dol.resize(end);
   for (const DolPatch& p : kDolPatches)
   {
     const size_t at = DolOffset(dol, p.address);
     if (at == SIZE_MAX)
-      return DolState::Unknown;
-    if (be32(&dol[at]) != p.replacement)
-      all_new = false;
+      return {};
+    Put32(dol, at, p.original);
   }
-  if (all_new)
-    return DolState::Patched;
-  return Sha1Hex(dol) == kMainDolSha1 ? DolState::Original : DolState::Unknown;
+  return dol;
 }
 
-std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol)
+struct GameSettings
+{
+  bool fps60 = true;
+  std::string aspect = "16:9";
+  float aspect_multiplier = 4.0f / 3.0f;
+};
+
+// Apply the code patches to an original main.dol and append the settings block the
+// patched code reads (same layout as tools/disc.py).
+std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol, const GameSettings& settings)
 {
   for (const DolPatch& p : kDolPatches)
-  {
-    const size_t at = DolOffset(dol, p.address);
-    dol[at] = uint8_t(p.replacement >> 24);
-    dol[at + 1] = uint8_t(p.replacement >> 16);
-    dol[at + 2] = uint8_t(p.replacement >> 8);
-    dol[at + 3] = uint8_t(p.replacement);
-  }
+    Put32(dol, DolOffset(dol, p.address), p.replacement);
+  std::vector<uint8_t> block(kSettingsSize, 0);
+  block[0] = settings.fps60 ? kFpsMask60 : kFpsMaskOriginal;
+  uint32_t bits;
+  memcpy(&bits, &settings.aspect_multiplier, 4);
+  Put32(block, 4, bits);
+  int slot = 7;
+  while (slot < 18 && be32(&dol[0x90 + slot * 4]) != 0)
+    ++slot;
+  dol.resize((dol.size() + 0x1F) & ~size_t(0x1F), 0);
+  const uint32_t at = uint32_t(dol.size());
+  dol.insert(dol.end(), block.begin(), block.end());
+  Put32(dol, slot * 4, at);
+  Put32(dol, 0x48 + slot * 4, kSettingsAddr);
+  Put32(dol, 0x90 + slot * 4, kSettingsSize);
   return dol;
 }
 
@@ -292,7 +330,7 @@ void Unpack(Disc& disc, const std::vector<uint8_t>& dol, const fs::path& root)
   if (fst.size() < 12)
     Fail(L"The disc's file table could not be read.");
 
-  WriteFile(partial / "sys" / "main.dol", PatchDol(dol));
+  WriteFile(partial / "sys" / "main.dol", dol);  // patched with settings at launch
   WriteFile(partial / "sys" / "boot.bin", {sys_area.begin(), sys_area.begin() + 0x440});
   WriteFile(partial / "sys" / "bi2.bin", {sys_area.begin() + 0x440, sys_area.begin() + 0x2440});
   WriteFile(partial / "sys" / "apploader.img", disc.Read(0x2440, 0x20 + app_size + app_trailer));
@@ -418,6 +456,76 @@ int ReadState(const fs::path& user, const std::string& key)
       return std::atoi(line.c_str() + eq + 1);
   }
   return 0;
+}
+
+std::string ReadIni(const fs::path& path, const std::string& section, const std::string& key)
+{
+  std::ifstream in(path);
+  bool in_section = false;
+  for (std::string line; std::getline(in, line);)
+  {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    const auto b = line.find_first_not_of(" \t");
+    if (b == std::string::npos)
+      continue;
+    line = line.substr(b);
+    if (line[0] == '[')
+    {
+      in_section = line.rfind("[" + section + "]", 0) == 0;
+      continue;
+    }
+    const auto eq = line.find('=');
+    if (!in_section || eq == std::string::npos)
+      continue;
+    std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+    k.erase(k.find_last_not_of(" \t") + 1);
+    v.erase(0, v.find_first_not_of(" \t"));
+    if (const auto c = v.find(';'); c != std::string::npos)
+      v.resize(c);
+    v.erase(v.find_last_not_of(" \t") + 1);
+    if (k == key)
+      return v;
+  }
+  return {};
+}
+
+// Player-facing game options in User\Config\ColosseumNative.ini, [Game] section.
+GameSettings ReadGameSettings(const fs::path& user)
+{
+  const fs::path file = user / "Config" / "ColosseumNative.ini";
+  EnsureIni(file, "Game", "FrameRate", "60   ; 60, or 30 for the original field frame rate");
+  EnsureIni(file, "Game", "AspectRatio", "16:9   ; 4:3, 16:9, 16:10, 21:9 or 32:9");
+  GameSettings s;
+  s.fps60 = ReadIni(file, "Game", "FrameRate") != "30";
+  const std::string aspect = ReadIni(file, "Game", "AspectRatio");
+  for (const AspectChoice& a : kAspects)
+  {
+    if (aspect == a.name)
+    {
+      s.aspect = a.name;
+      s.aspect_multiplier = a.multiplier;
+    }
+  }
+  return s;
+}
+
+// Dolphin's output aspect must match what the game renders.
+void SyncDolphinAspect(const fs::path& user, const GameSettings& s)
+{
+  const fs::path gfx = user / "Config" / "GFX.ini";
+  if (s.aspect == "4:3")
+    EnsureIni(gfx, "Settings", "AspectRatio", "2", true);
+  else if (s.aspect == "16:9")
+    EnsureIni(gfx, "Settings", "AspectRatio", "1", true);
+  else
+  {
+    const auto colon = s.aspect.find(':');
+    EnsureIni(gfx, "Settings", "AspectRatio", "4", true);
+    EnsureIni(gfx, "Settings", "CustomAspectRatioWidth", s.aspect.substr(0, colon), true);
+    EnsureIni(gfx, "Settings", "CustomAspectRatioHeight", s.aspect.substr(colon + 1), true);
+  }
+  EnsureIni(gfx, "Settings", "wideScreenHack", "False", true);
 }
 
 void WriteState(const fs::path& user, const std::string& key, int value)
@@ -648,26 +756,26 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
   if (!GameReady(game) || !disc_arg.empty())
     SetupGame(game, disc_arg);
 
-  // Installs unpacked by an older build hold the original main.dol; patch it in place.
+  WriteDefaultSettings(user);
+  const GameSettings settings = ReadGameSettings(user);
+  SyncDolphinAspect(user, settings);
+
+  // The recompiled code was built from main.dol with kDolPatches applied; the game must
+  // boot exactly that, plus the settings block. Works from an original main.dol or one
+  // patched by any earlier build; only rewrites the file when something changed.
   {
     const fs::path dol_path = game / "sys" / "main.dol";
     std::ifstream in(dol_path, std::ios::binary);
     std::vector<uint8_t> dol((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     in.close();
-    switch (CheckDol(dol))
-    {
-    case DolState::Patched:
-      break;
-    case DolState::Original:
-      if (!WriteFile(dol_path, PatchDol(std::move(dol))))
-        Fail(L"Could not update Game\\sys\\main.dol. Is the folder read-only?");
-      break;
-    case DolState::Unknown:
+    const std::vector<uint8_t> original = RestoreOriginalDol(dol);
+    if (original.empty() || Sha1Hex(original) != kMainDolSha1)
       Fail(L"Game\\sys\\main.dol doesn't match this build. Delete the Game folder and run "
            L"ColosseumNative.exe again to unpack your disc.");
-    }
+    const std::vector<uint8_t> wanted = PatchDol(original, settings);
+    if (wanted != dol && !WriteFile(dol_path, wanted))
+      Fail(L"Could not update Game\\sys\\main.dol. Is the folder read-only?");
   }
-  WriteDefaultSettings(user);
   if (setup_only)
     return 0;
 
