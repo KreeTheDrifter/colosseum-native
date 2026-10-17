@@ -95,9 +95,38 @@ inside Dolphin's VideoCommon (`patches/dolphin.patch`, `VideoCommon/FrameInterpo
    half a field (8 ms) of added latency. The in-between frame is matched to the XFB
    address it precedes, because the VI shows each XFB one frame after it was drawn.
 
+Also blended: BP TEV colour registers (screen fades, flashes) and inline vertex data
+(2D sprites, particles, CPU-animated meshes). Inline draws pair with the nearest draw
+of the same kind in the previous frame, and matrix loads whose in-order partner fits
+worse than a nearby one take the closest (a blinking cursor sharing a window frame's
+texture shifts the order).
+
 Menu: Frame rate 30 / 60 / 120 (interpolated). 144 Hz displays show it best with
 VRR (FreeSync/G-Sync); fixed 144 Hz would need in-between frames at varying t, which
-is a later step. Not interpolated yet: TEV colour fades driven by BP registers.
+is a later step.
+
+## Performance
+
+Measured on the Linux build, Null renderer, uncapped, from a gameplay save state
+(Outskirt Stand), 2-core Xeon:
+
+| Change | Frames per second |
+|---|---|
+| Baseline | 45.7 |
+| No mod-hook checks when no mods are loaded; game ID read every 256 slices | 51 |
+| + idle-loop skip at 0x800FEB9C | 75 |
+
+- **Idle loop.** A background thread spins in a polling loop (0x800FEA90 to 0x800FEB9C,
+  disable interrupts, walk a list, re-enable) whenever the game waits for the next
+  field. `StaticRecompIdlePC = 0x800FEB9C` makes the dispatcher hand the rest of the
+  time slice back to CoreTiming at that back-edge, which cuts emulated work by about 4x.
+  Gameplay, area loads and the interpolation tests are unchanged with it on.
+- **Startup.** The runtime no longer SHA-256s every file on the disc (over 1 GB, twice)
+  at each start; nothing in the runtime used that hash.
+- **First-run quality** follows the graphics card (DXGI dedicated memory): integrated
+  graphics get 2x / no MSAA, mid-range 3x / 2x MSAA, high-end 4x / 4x MSAA. The menu's
+  quality presets (Performance, Balanced, High, Ultra) change them later.
+
 
 ## Delivery
 

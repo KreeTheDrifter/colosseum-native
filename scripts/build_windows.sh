@@ -64,12 +64,17 @@ cmake -S "$MG/vendor/dolphin/module-template" -B "$work/module-win" -G Ninja -DC
   -DCMAKE_TOOLCHAIN_FILE="$TC" -DGAME_ID=GC6E01 -DGENERATED_DIR="$here/recomp/generated" \
   -DGXRUNTIME_DIR="$MG/vendor/dolphin/GXRuntime" \
   -DCHASSIS_ABI_DIR="$MG/vendor/dolphin/Source/Core/Core/PowerPC/StaticRecomp" \
-  -DRECOMPCORE_MODULE_ENABLE_IPO=OFF -DRECOMPCORE_MODULE_OPT_LEVEL=2 -DPython3_EXECUTABLE="$(command -v python3)"
+  -DCMAKE_C_FLAGS="-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A00000C -idirafter $CASE_SHIM -march=x86-64-v2" \
+  -DRECOMPCORE_MODULE_ENABLE_IPO=ON -DRECOMPCORE_MODULE_OPT_LEVEL=3 -DPython3_EXECUTABLE="$(command -v python3)"
+# -O3 + ThinLTO + x86-64-v2 (SSE4.2/POPCNT; every Windows 11 PC) is about 10% faster than
+# -O2 on the game code. FP contraction stays off (module template), so results don't change.
 cmake --build "$work/module-win" -j"$jobs"
 
 # 6. Launcher.
+# The launcher refuses a game-code DLL from another build (it patches main.dol to match).
+module_sha1=$(sha1sum "$work/module-win/gGC6E01_recomp.dll" | cut -d' ' -f1)
 "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang++" -std=c++20 -O2 -Wall -municode -mwindows -static \
-  -D_WIN32_WINNT=0x0A00 "$here/app/launcher/colosseum_launcher.cpp" -lbcrypt -lcomdlg32 \
+  -D_WIN32_WINNT=0x0A00 -DCOLO_MODULE_SHA1="\"$module_sha1\"" "$here/app/launcher/colosseum_launcher.cpp" -lbcrypt -lcomdlg32 -ldxgi \
   -o "$out/ColosseumNative.exe"
 
 # 7. HD texture builder (Real-ESRGAN is downloaded by the tool on first use).

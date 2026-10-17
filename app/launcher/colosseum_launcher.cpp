@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <commdlg.h>
+#include <dxgi.h>
 #include <shellapi.h>
 
 #include <algorithm>
@@ -572,12 +573,40 @@ void WriteControllerProfile(const fs::path& user)
   WriteState(user, "PadProfile", kPadProfileVersion);
 }
 
+// Graphics tier from the biggest graphics card's dedicated memory: 0 = integrated or
+// small (under 1.5 GB), 1 = mid-range (under 5 GB), 2 = high-end.
+int GpuTier()
+{
+  IDXGIFactory1* factory = nullptr;
+  if (FAILED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory))))
+    return 1;
+  SIZE_T best = 0;
+  IDXGIAdapter1* adapter = nullptr;
+  for (UINT i = 0; factory->EnumAdapters1(i, &adapter) != DXGI_ERROR_NOT_FOUND; ++i)
+  {
+    DXGI_ADAPTER_DESC1 desc{};
+    if (SUCCEEDED(adapter->GetDesc1(&desc)) && !(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE))
+      best = std::max(best, desc.DedicatedVideoMemory);
+    adapter->Release();
+  }
+  factory->Release();
+  const SIZE_T mb = best / (1024 * 1024);
+  return mb < 1536 ? 0 : mb < 5120 ? 1 : 2;
+}
+
 // Default settings. Whole files are written only when missing; required keys are added
 // to existing files without touching anything the player changed.
 void WriteDefaultSettings(const fs::path& user)
 {
   fs::create_directories(user / "Config");
   fs::create_directories(user / "GC");
+  // First-run quality from the graphics card (the in-game menu has presets to change it):
+  // integrated graphics 2x / no MSAA, mid-range 3x / 2x MSAA, high-end 4x / 4x MSAA.
+  const bool first_run = !fs::exists(user / "config.ini") || !fs::exists(user / "Config" / "GFX.ini");
+  const int tier = first_run ? GpuTier() : 2;
+  const char* kResolution[] = {"1280x1056", "1920x1584", "2560x2112"};
+  const char* kMsaa[] = {"0x00000001", "0x00000002", "0x00000004"};
+  const char* kAniso[] = {"2", "3", "4"};
   if (!fs::exists(user / "config.ini"))
   {
     // Vulkan is fastest; fall back to OpenGL on PCs without a Vulkan driver.
@@ -589,7 +618,7 @@ void WriteDefaultSettings(const fs::path& user)
               "# ModernGekko frontend settings\n"
               "# resolution is the internal render size: 640x528 times 1-12.\n"
               "[Video]\n"
-              "resolution=2560x2112\n"
+              "resolution=" + std::string(kResolution[tier]) + "\n"
               "backend=" + std::string(backend) + "\n"
               "fullscreen=false\n"
               "show_fps_in_title=true\n"
@@ -603,14 +632,14 @@ void WriteDefaultSettings(const fs::path& user)
               "[Settings]\n"
               "AspectRatio = 1\n"
               "wideScreenHack = False\n"
-              "MSAA = 0x00000004\n"
+              "MSAA = " + std::string(kMsaa[tier]) + "\n"
               "SSAA = False\n"
-              "EnablePixelLighting = True\n"
+              "EnablePixelLighting = " + std::string(tier ? "True" : "False") + "\n"
               "ShaderCompilationMode = 2\n"
               "WaitForShadersBeforeStarting = False\n"
               "HiresTextures = True\n"
               "[Enhancements]\n"
-              "MaxAnisotropy = 4\n"
+              "MaxAnisotropy = " + std::string(kAniso[tier]) + "\n"
               "ArbitraryMipmapDetection = True\n"
               "ForceTrueColor = True\n"
               "DisableCopyFilter = True\n");
@@ -640,6 +669,11 @@ void WriteDefaultSettings(const fs::path& user)
   EnsureIni(dolphin, "Core", "SlotA", "1");
   EnsureIni(dolphin, "Core", "SlotB", "255");
   EnsureIni(dolphin, "Core", "MemcardAPath", (user / "GC" / "MemoryCardA.USA.raw").string());
+  // Colosseum's background thread spins in a polling loop at 0x800FEA90..0x800FEB9C
+  // whenever the game waits for the next video field. Treating its back-edge as idle lets
+  // the emulated clock skip ahead instead of burning the CPU: same game behaviour, far
+  // less CPU time (frees the processor for rendering; cooler and longer battery on laptops).
+  EnsureIni(dolphin, "Core", "StaticRecompIdlePC", "2148527004", true);
 }
 
 fs::path PickDisc()
@@ -713,6 +747,20 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int)
   if (!fs::exists(runtime) || !fs::exists(module))
     Fail(L"moderngekko-run.exe or gGC6E01_recomp.dll is missing. Keep all files from "
          L"the download together in one folder.");
+
+#ifdef COLO_MODULE_SHA1
+  // The game code must come from the same build as this launcher (it patches main.dol to
+  // match it). A leftover file from an older build crashes as soon as new code runs.
+  {
+    std::ifstream in(module, std::ios::binary);
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (Sha1Hex(bytes) != COLO_MODULE_SHA1)
+      Fail(L"gGC6E01_recomp.dll is from a different test build than ColosseumNative.exe.\n\n"
+           L"Copy ALL files from the new download into this folder (replace the old ones), "
+           L"making sure they don't end up in a folder inside it.\n\nFolder: " +
+           here.wstring());
+  }
+#endif
 
   // Arguments: an optional disc image path (also what drag-and-drop passes), and
   // --setup-only to unpack and write settings without starting the game.

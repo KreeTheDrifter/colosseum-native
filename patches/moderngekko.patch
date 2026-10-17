@@ -38,8 +38,21 @@ index c0548a0..f15e4fa 100644
 +        endif()
 +    endforeach()
 +endif()
+diff --git a/include/moderngekko/game.hpp b/include/moderngekko/game.hpp
+index aeafd0e..73d5997 100644
+--- a/include/moderngekko/game.hpp
++++ b/include/moderngekko/game.hpp
+@@ -35,7 +35,7 @@ struct GameInspectResult
+   explicit operator bool() const { return metadata.has_value(); }
+ };
+ 
+-GameInspectResult InspectGame(const std::filesystem::path& root);
++GameInspectResult InspectGame(const std::filesystem::path& root, bool hash_assets = true);
+ std::optional<std::string> HashFileSha256(const std::filesystem::path& path);
+ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root);
+ }  // namespace moderngekko
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..cfdc359 100644
+index f9b5405..2b60681 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -41,6 +41,8 @@
@@ -60,7 +73,36 @@ index f9b5405..cfdc359 100644
  void Host_Message(HostMessageID id) {
    if (id == HostMessageID::WMUserStop && s_platform)
      s_platform->Stop();
-@@ -782,6 +784,7 @@ RuntimeRunResult Runtime::Run() {
+@@ -554,7 +556,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+         RuntimeError{RuntimeErrorCode::AlreadyActive,
+                      "only one ModernGekko runtime may be active per process"}};
+ 
+-  GameInspectResult inspected = InspectGame(config.game_root);
++  GameInspectResult inspected = InspectGame(config.game_root, false);
+   if (!inspected)
+     return {{}, RuntimeError{RuntimeErrorCode::InvalidGame, inspected.error}};
+ 
+@@ -700,11 +702,14 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+     recomp_source = StaticRecompModuleSource::Attached(
+         reinterpret_cast<const StaticRecompModuleDesc *>(
+             impl->config.module.descriptor));
+-  recomp_source.host_call = &ModManager::HostCall;
+-  recomp_source.host_call_contains = &ModManager::HostCallContains;
+-  recomp_source.host_call_range_contains =
+-      &ModManager::HostCallRangeContains;
+-  recomp_source.host_call_user = impl->mods.get();
++  // Mod hooks are checked on every dispatch; with no mods loaded, skip them entirely.
++  if (!impl->mods->Empty()) {
++    recomp_source.host_call = &ModManager::HostCall;
++    recomp_source.host_call_contains = &ModManager::HostCallContains;
++    recomp_source.host_call_range_contains =
++        &ModManager::HostCallRangeContains;
++    recomp_source.host_call_user = impl->mods.get();
++  }
+   jit.SetStaticRecompModuleSource(std::move(recomp_source));
+ 
+   s_runtime_active = true;
+@@ -782,6 +787,7 @@ RuntimeRunResult Runtime::Run() {
          if (state == Core::State::Uninitialized && m_impl->platform)
            m_impl->platform->Stop();
        });
@@ -68,3 +110,48 @@ index f9b5405..cfdc359 100644
    if (!BootManager::BootCore(Core::System::GetInstance(), std::move(boot),
                               m_impl->platform->GetWindowSystemInfo())) {
      m_impl->running = false;
+diff --git a/src/runtime/game.cpp b/src/runtime/game.cpp
+index 85860a5..b37ceb7 100644
+--- a/src/runtime/game.cpp
++++ b/src/runtime/game.cpp
+@@ -69,7 +69,7 @@ std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root
+   return Sha256(std::move(manifest));
+ }
+ 
+-GameInspectResult InspectGame(const std::filesystem::path& input_root)
++GameInspectResult InspectGame(const std::filesystem::path& input_root, bool hash_assets)
+ {
+   std::error_code ec;
+   const auto root = std::filesystem::weakly_canonical(input_root, ec);
+@@ -143,10 +143,14 @@ GameInspectResult InspectGame(const std::filesystem::path& input_root)
+       return {{}, "can't hash files/_Main.rel"};
+     metadata.rel_sha256 = *rel_hash;
+   }
+-  const auto assets_hash = HashDirectorySha256(root / "files");
+-  if (!assets_hash)
+-    return {{}, "can't hash the files directory"};
+-  metadata.assets_sha256 = *assets_hash;
++  if (hash_assets) {
++    // Reads every file on the disc (over a gigabyte); only tools that compare
++    // installations need it, not the runtime at every start.
++    const auto assets_hash = HashDirectorySha256(root / "files");
++    if (!assets_hash)
++      return {{}, "can't hash the files directory"};
++    metadata.assets_sha256 = *assets_hash;
++  }
+   return {std::move(metadata), {}};
+ }
+ }  // namespace moderngekko
+diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
+index d6b3569..1f02524 100644
+--- a/tools/moderngekko_run.cpp
++++ b/tools/moderngekko_run.cpp
+@@ -279,7 +279,7 @@ int RunMain(int argc, char **argv) {
+   if (dol_changed)
+     std::cout << "Applied native DOL patches\n";
+ #endif
+-  const auto inspected = moderngekko::InspectGame(config.game_root);
++  const auto inspected = moderngekko::InspectGame(config.game_root, false);
+   if (!inspected) {
+     std::cerr << "invalid game: " << inspected.error << '\n';
+     return 2;

@@ -272,6 +272,51 @@ void SetCasSharpness(float value)
   config->SaveOptionsConfiguration();
 }
 
+// Quality presets: set several graphics options at once. Shown as "Custom" when the
+// current settings match none of them.
+struct Preset
+{
+  const char* label;
+  int scale;
+  int msaa;
+  int anisotropy;  // log2
+  bool pixel_lighting;
+};
+constexpr std::array<Preset, 4> kPresets = {{
+    {"Performance (2x, no AA)", 2, 1, 2, false},
+    {"Balanced (3x, 2x MSAA)", 3, 2, 3, true},
+    {"High (4x, 4x MSAA)", 4, 4, 4, true},
+    {"Ultra (6x, 8x MSAA)", 6, 8, 4, true},
+}};
+
+int CurrentPreset()
+{
+  const int scale = Config::Get(Config::GFX_EFB_SCALE);
+  const int msaa = static_cast<int>(Config::Get(Config::GFX_MSAA));
+  const int af = static_cast<int>(Config::Get(Config::GFX_ENHANCE_MAX_ANISOTROPY));
+  const bool ppl = Config::Get(Config::GFX_ENABLE_PIXEL_LIGHTING);
+  for (size_t i = 0; i < kPresets.size(); ++i)
+  {
+    const Preset& p = kPresets[i];
+    if (p.scale == scale && p.msaa == msaa && p.anisotropy == af && p.pixel_lighting == ppl &&
+        !Config::Get(Config::GFX_SSAA))
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
+void ApplyPreset(const Preset& p)
+{
+  Config::SetBase(Config::GFX_EFB_SCALE, p.scale);
+  SaveRuntimeResolution(p.scale);
+  Config::SetBase(Config::GFX_MSAA, static_cast<u32>(p.msaa));
+  Config::SetBase(Config::GFX_SSAA, false);
+  Config::SetBase(Config::GFX_ENHANCE_MAX_ANISOTROPY,
+                  static_cast<AnisotropicFilteringMode>(p.anisotropy));
+  Config::SetBase(Config::GFX_ENABLE_PIXEL_LIGHTING, p.pixel_lighting);
+  s_dirty = true;
+}
+
 std::vector<Item> BuildItems()
 {
   std::vector<Item> items;
@@ -284,6 +329,16 @@ std::vector<Item> BuildItems()
   };
 
   header("Graphics");
+  {
+    const int preset = CurrentPreset();
+    items.push_back({"Quality preset", preset < 0 ? "Custom" : kPresets[preset].label, false,
+                     false, [preset](int dir) {
+                       const int next =
+                           preset < 0 ? (dir > 0 ? 0 : static_cast<int>(kPresets.size()) - 1) :
+                                        Wrap(preset + dir, kPresets);
+                       ApplyPreset(kPresets[next]);
+                     }});
+  }
   {
     const int scale = std::max(1, Config::Get(Config::GFX_EFB_SCALE));
     items.push_back({"Internal resolution",
