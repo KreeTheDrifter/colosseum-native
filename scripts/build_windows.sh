@@ -8,6 +8,7 @@
 #   moderngekko-run.exe   ModernGekko runtime
 #   gGC6E01_recomp.dll    recompiled Pokemon Colosseum (USA) code
 #   Sys\                  Dolphin data (GC6E01 game settings, GameCube fonts)
+#   UpscaleTextures.exe   builds an AI-upscaled HD texture pack from dumped textures
 #
 # Needs: cmake, ninja, python3, git. Downloads llvm-mingw and ModernGekko-Template.
 set -euo pipefail
@@ -70,6 +71,10 @@ cmake --build "$work/module-win" -j"$jobs"
 "$LLVM_MINGW/bin/x86_64-w64-mingw32-clang++" -std=c++20 -O2 -Wall -municode -mwindows -static \
   -D_WIN32_WINNT=0x0A00 "$here/app/launcher/colosseum_launcher.cpp" -lbcrypt -lcomdlg32 \
   -o "$out/ColosseumNative.exe"
+
+# 7. HD texture builder (Real-ESRGAN is downloaded by the tool on first use).
+"$LLVM_MINGW/bin/x86_64-w64-mingw32-clang++" -std=c++20 -O2 -static -D_WIN32_WINNT=0x0A00 \
+  "$here/app/textools/upscale_textures.cpp" -lurlmon -o "$out/UpscaleTextures.exe"
 
 cp "$work/runtime-win/moderngekko-run.exe" "$out/"
 rm -rf "$out/Sys"; cp -r "$MG/vendor/dolphin/Data/Sys" "$out/Sys"   # game settings, GC fonts, DSP ROMs

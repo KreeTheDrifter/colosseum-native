@@ -321,6 +321,18 @@ std::vector<Item> BuildItems()
   }
   toggle("Per-pixel lighting", Config::GFX_ENABLE_PIXEL_LIGHTING);
   toggle("HD texture packs", Config::GFX_HIRES_TEXTURES);
+  items.push_back({"Dump textures for HD pack", Config::Get(Config::GFX_DUMP_TEXTURES) ? "On" : "Off",
+                   false, false, [](int) {
+                     const bool on = !Config::Get(Config::GFX_DUMP_TEXTURES);
+                     Config::SetBase(Config::GFX_DUMP_TEXTURES, on);
+                     // Dolphin turns dumping off at every start; remember it ourselves.
+                     WriteGameOption("DumpTextures", on ? "1" : "0");
+                     Config::SetBase(Config::GFX_DUMP_BASE_TEXTURES, true);
+                     Config::SetBase(Config::GFX_DUMP_MIP_TEXTURES, false);
+                     if (on)
+                       SetStatus("Play normally; then run UpscaleTextures.exe");
+                     s_dirty = true;
+                   }});
 
   header("Game");
   items.push_back({"Frame rate", s_fps60 ? "60 fps" : "30 fps (original)", false, false, [](int) {
@@ -504,6 +516,12 @@ void Draw()
   {
     s_hint_shown = true;
     LoadGameOptions();
+    if (ReadGameOption("DumpTextures", "0") == "1")
+    {
+      Config::SetBase(Config::GFX_DUMP_TEXTURES, true);
+      Config::SetBase(Config::GFX_DUMP_BASE_TEXTURES, true);
+      Config::SetBase(Config::GFX_DUMP_MIP_TEXTURES, false);
+    }
     OSD::AddMessage("Settings: Esc or F1 (controller: View button)", 8000);
   }
 
