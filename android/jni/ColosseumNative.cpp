@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -154,7 +155,11 @@ private:
 
 std::string Sha1Hex(const std::vector<uint8_t>& data)
 {
-  return Common::SHA1::DigestToString(Common::SHA1::CalculateDigest(data));
+  // Lowercase, like kMainDolSha1 (Dolphin's DigestToString is uppercase).
+  std::string hex = Common::SHA1::DigestToString(Common::SHA1::CalculateDigest(data));
+  std::transform(hex.begin(), hex.end(), hex.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return hex;
 }
 
 bool WriteFile(const fs::path& path, const std::vector<uint8_t>& data)
