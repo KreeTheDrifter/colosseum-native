@@ -377,6 +377,15 @@ void WriteDefaultSettings()
     Config::SetBase(Config::GFX_WAIT_FOR_SHADERS_BEFORE_STARTING, true);
     launcher->Set("AndroidDefaults", 1);
   }
+  if (defaults < 2)
+  {
+    // Vulkan: faster on Adreno than OpenGL ES (whose driver rejected some of Dolphin's
+    // shaders on an S24 Ultra), and custom GPU drivers only work with it. A shader that
+    // fails to build shouldn't stop the game with a dialog either; it's logged instead.
+    Config::SetBase(Config::MAIN_GFX_BACKEND, std::string("Vulkan"));
+    Config::SetBase(Config::MAIN_USE_PANIC_HANDLERS, false);
+    launcher->Set("AndroidDefaults", 2);
+  }
   // The game renders 16:9 itself (patched into the recompiled code).
   Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
   const std::string aspect = GameOption("AspectRatio", "16:9");
