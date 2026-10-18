@@ -47,7 +47,7 @@ jobs:
           for s in Externals/Qt Externals/FFmpeg-bin DolRecomp Externals/wil; do
             git config "submodule.$s.update" none || true
           done
-          git submodule update --depth 1 --jobs 8 --recursive
+          git submodule update --init --recursive --depth 1 --jobs 8
 
       - name: Apply our patches and files
         run: |
