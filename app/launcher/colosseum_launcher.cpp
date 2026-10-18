@@ -267,7 +267,10 @@ std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol, const GameSettings& sett
   for (const DolPatch& p : kDolPatches)
     Put32(dol, DolOffset(dol, p.address), p.replacement);
   const size_t at = DolOffset(dol, kSettingsAddr);
-  dol[at] = settings.fps60 ? kFpsMask60 : kFpsMaskOriginal;
+  // Always the game's own frame pacing: 60 fps game logic soft-locked scripted scenes.
+  // 60/120 fps output comes from interpolated frames in the runtime.
+  (void)settings.fps60;
+  dol[at] = kFpsMaskOriginal;
   uint32_t bits;
   memcpy(&bits, &settings.aspect_multiplier, 4);
   Put32(dol, at + 4, bits);
@@ -473,7 +476,7 @@ std::string ReadIni(const fs::path& path, const std::string& section, const std:
 GameSettings ReadGameSettings(const fs::path& user)
 {
   const fs::path file = user / "Config" / "ColosseumNative.ini";
-  EnsureIni(file, "Game", "FrameRate", "60   ; 60, 120 (60 + interpolated in-between frames, for 120 Hz+ screens) or 30 (original)");
+  EnsureIni(file, "Game", "FrameRate", "60   ; 60 or 120 (smooth: rendered in-between frames), or 30 (original)");
   EnsureIni(file, "Game", "AspectRatio", "16:9   ; 4:3, 16:9, 16:10, 21:9 or 32:9");
   GameSettings s;
   s.fps60 = ReadIni(file, "Game", "FrameRate") != "30";

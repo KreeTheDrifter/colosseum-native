@@ -80,8 +80,9 @@ inside Dolphin's VideoCommon (`patches/dolphin.patch`, `VideoCommon/FrameInterpo
    a snapshot of the GPU state it started from (BP/CP/XF memory, TMEM, shader-manager
    constants) and every XF load (immediate and indexed) with its values.
 2. At frame N's XFB copy, frame N is drawn a second time from the recording, with each
-   position/normal/texture/post matrix, light position/direction, projection and
-   material/ambient colour blended halfway towards frame N-1. Loads are matched between
+   position/normal matrix, light position/direction, projection and BP TEV colour
+   blended towards frame N-1 (texture/post matrices and material colours are not
+   blended: scrolling-texture and colour-cycling effects broke). Loads are matched between
    frames by address, a signature of the next draw (primitive, vertex count, vertex
    descriptor, position array, texture 0) and occurrence. Unmatched loads (new objects,
    CPU-animated vertices) keep frame N's values; rotations over ~60° per frame and
@@ -103,7 +104,15 @@ of the same kind in the previous frame, and matrix loads whose in-order partner 
 worse than a nearby one take the closest (a blinking cursor sharing a window frame's
 texture shifts the order).
 
-Menu: Frame rate 30 / 60 / 120 (interpolated). 144 Hz displays show it best with
+Game logic always runs at its original pacing. The DOL setting that forces 60 Hz logic
+everywhere (0x80266370 = 0x00) soft-locks scripted scenes: after the mayor's forced
+dialogue in Phenac the player can't move. So the presenter measures D, the fields per
+game frame (1 in towns at 60, 2 in the field at 30), and the output runs at M presents
+per field (M = 1 for "60 smooth", 2 for "120 smooth"): D*M-1 in-between frames (max 3)
+at t = k/(D*M). Late-matching (pass 2, loose signature) also takes the nearest unused
+candidate rather than the in-order one.
+
+Menu: Frame rate 30 (original) / 60 (smooth) / 120 (smooth). 144 Hz displays show it best with
 VRR (FreeSync/G-Sync); fixed 144 Hz would need in-between frames at varying t, which
 is a later step.
 

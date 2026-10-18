@@ -293,7 +293,7 @@ index 8d0ae0c..f4a5bb3 100644
        {
          RequestShutdown();
 diff --git a/Source/Core/VideoCommon/BPStructs.cpp b/Source/Core/VideoCommon/BPStructs.cpp
-index 180bc86..62d2ab6 100644
+index 180bc86..7854d24 100644
 --- a/Source/Core/VideoCommon/BPStructs.cpp
 +++ b/Source/Core/VideoCommon/BPStructs.cpp
 @@ -3,6 +3,9 @@
@@ -341,25 +341,16 @@ index 180bc86..62d2ab6 100644
      INCSTAT(g_stats.this_frame.num_token_int);
      g_texture_cache->FlushEFBCopies();
      g_texture_cache->FlushStaleBinds();
-@@ -303,6 +313,17 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -303,6 +313,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
        // Check if we are to copy from the EFB or draw to the XFB
        if (PE_copy.copy_to_xfb == 0)
        {
-+        // The in-between frame must never write guest RAM: an EFB copy zeroes (or fills)
-+        // its destination, and by the time frame N is replayed the game may already be
-+        // using that memory for something else (it crashed on area loads). The textures
-+        // frame N copied are still in the cache, so the replay simply uses those.
-+        if (FrameInterpolation::g_replaying)
-+        {
-+          if (std::getenv("COLO_INTERP_EFBLOG"))
-+            std::fprintf(stderr, "[interp] replay EFB copy dest=%08x %ux%u stride=%u\n", destAddr,
-+                         copy_width, copy_height, destStride);
-+          goto after_copy;
-+        }
++        // In the in-between frame, EFB copies go to VRAM only (TextureCacheBase checks
++        // FrameInterpolation::g_replaying): writing guest RAM there crashed area loads.
          // bpmem.zcontrol.pixel_format to PixelFormat::Z24 is when the game wants to copy from
          // ZBuffer (Zbuffer uses 24-bit Format)
          bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
-@@ -335,6 +356,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -335,6 +347,16 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
                        destAddr, srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
                        bpmem.copyTexSrcWH.x + 1, destStride, height, yScale);
  
@@ -376,7 +367,7 @@ index 180bc86..62d2ab6 100644
          bool is_depth_copy = bpmem.zcontrol.pixel_format == PixelFormat::Z24;
          g_texture_cache->CopyRenderTargetToTexture(
              destAddr, EFBCopyFormat::XFB, copy_width, height, destStride, is_depth_copy, srcRect,
-@@ -351,6 +382,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -351,6 +373,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
          // memory so they form a single completed XFB. See
          // https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
          system.GetVideoEvents().after_frame_event.Trigger(system);
@@ -384,7 +375,7 @@ index 180bc86..62d2ab6 100644
  
          // Note: Theoretically, in the future we could track the VI configuration and try to detect
          //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
-@@ -371,9 +403,11 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -371,6 +394,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
              vi.FakeVIUpdate(destAddr, srcRect.GetWidth(), destStride, height);
            }
          }
@@ -392,11 +383,24 @@ index 180bc86..62d2ab6 100644
        }
      }
  
-+  after_copy:
-     // Clear the rectangular region after copying it.
-     if (PE_copy.clear)
-     {
-@@ -519,6 +553,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+@@ -416,7 +440,15 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
+     static_assert(MAX_LOADABLE_TMEM_ADDR + MAX_TMEM_LINE_COUNT < TMEM_SIZE);
+ 
+     auto& memory = system.GetMemory();
+-    memory.CopyFromEmu(s_tex_mem.data() + tmem_addr, addr, tmem_transfer_count);
++    // The in-between frame uses the palette frame N loaded: the CPU, a frame ahead, may
++    // already have changed that memory.
++    if (!FrameInterpolation::g_replaying ||
++        !FrameInterpolation::ReplayTlut(s_tex_mem.data() + tmem_addr, tmem_transfer_count))
++    {
++      memory.CopyFromEmu(s_tex_mem.data() + tmem_addr, addr, tmem_transfer_count);
++    }
++    if (FrameInterpolation::g_recording)
++      FrameInterpolation::RecordTlut(s_tex_mem.data() + tmem_addr, tmem_transfer_count);
+ 
+     if (OpcodeDecoder::g_record_fifo_data)
+       system.GetFifoRecorder().UseMemory(addr, tmem_transfer_count, MemoryUpdate::Type::TMEM);
+@@ -519,6 +551,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager&
    case BPMEM_CLEARBBOX1:
    case BPMEM_CLEARBBOX2:
    {
@@ -420,10 +424,10 @@ index 69a0968..c19049f 100644
    FreeLookCamera.cpp
 diff --git a/Source/Core/VideoCommon/FrameInterpolation.cpp b/Source/Core/VideoCommon/FrameInterpolation.cpp
 new file mode 100644
-index 0000000..eeff29e
+index 0000000..ea23f09
 --- /dev/null
 +++ b/Source/Core/VideoCommon/FrameInterpolation.cpp
-@@ -0,0 +1,1012 @@
+@@ -0,0 +1,1122 @@
 +// Copyright 2026 Colosseum Native
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
@@ -517,6 +521,7 @@ index 0000000..eeff29e
 +  std::vector<XFEvent> events;
 +  std::vector<u32> values;
 +  std::vector<Draw> draws;
++  std::vector<u8> tluts;  // palette loads, in order
 +  size_t unsigned_from = 0;  // events still waiting for a draw signature
 +
 +  void Clear()
@@ -525,6 +530,7 @@ index 0000000..eeff29e
 +    events.clear();
 +    values.clear();
 +    draws.clear();
++    tluts.clear();
 +    unsigned_from = 0;
 +  }
 +};
@@ -541,6 +547,10 @@ index 0000000..eeff29e
 +
 +std::vector<u32> s_interp_values;  // per s_cur.values, blended
 +float s_t = 0.5f;
++size_t s_tlut_read = 0;
++float s_t_override = -1.0f;  // COLO_INTERP_T (debug)
++std::atomic<int> s_presents_per_field{2};
++int s_fields_per_frame = 1;  // how long the last game frame stayed on screen, in fields
 +bool s_log = false;
 +bool s_debug_frame = false;
 +
@@ -551,7 +561,7 @@ index 0000000..eeff29e
 +struct Ready
 +{
 +  u32 addr = 0;
-+  std::shared_ptr<TCacheEntry> entry;
++  std::vector<std::shared_ptr<TCacheEntry>> entries;
 +};
 +std::array<Ready, 4> s_ready;
 +u32 s_ready_seq = 0;
@@ -560,8 +570,8 @@ index 0000000..eeff29e
 +{
 +  for (Ready& r : s_ready)
 +  {
-+    if (r.entry && r.addr == addr)
-+      r.entry.reset();
++    if (r.addr == addr)
++      r.entries.clear();
 +  }
 +}
 +
@@ -677,6 +687,12 @@ index 0000000..eeff29e
 +}
 +
 +// How different two loads of the same registers are (sum of absolute value differences).
++bool IsColorEvent(const XFEvent& e)
++{
++  return IsBPColorEvent(e.address) ||
++         (e.address <= XFMEM_SETCHAN1_MATCOLOR && e.address + e.count > XFMEM_SETCHAN0_AMBCOLOR);
++}
++
 +float EventDistance(const XFEvent& e, const XFEvent& p)
 +{
 +  float sum = 0;
@@ -685,6 +701,13 @@ index 0000000..eeff29e
 +    const u32 a = s_cur.values[e.offset + i], b = s_prev.values[p.offset + i];
 +    if (a == b)
 +      continue;
++    if (IsColorEvent(e))
++    {
++      // Colours: per-byte difference (the words aren't floats).
++      for (int sh = 0; sh < 32; sh += 8)
++        sum += std::abs(int((a >> sh) & 0xff) - int((b >> sh) & 0xff));
++      continue;
++    }
 +    const float d = std::fabs(F(a) - F(b));
 +    sum += std::isfinite(d) ? d : 1e30f;
 +  }
@@ -774,6 +797,10 @@ index 0000000..eeff29e
 +      // Texture matrices (GX_TEXMTX0 = 30, i.e. word 120 onward): don't slide back across a
 +      // scrolling texture's wrap-around.
 +      texture_translation = addr >= 120 && (addr & 3) == 3;
++      // Texture matrices (word 120 on) stay as in frame N: games animate them with jumps
++      // (Phenac's red dome lost its colour when they were blended).
++      if (addr >= 120)
++        lerp = false;
 +    }
 +    else if (addr >= XFMEM_NORMALMATRICES && addr < XFMEM_NORMALMATRICES_END)
 +    {
@@ -783,6 +810,7 @@ index 0000000..eeff29e
 +    {
 +      lerp = true;
 +      texture_translation = (addr & 3) == 3;
++      lerp = false;  // texture post-matrices: see above
 +    }
 +    else if (addr >= XFMEM_LIGHTS && addr < XFMEM_LIGHTS_END)
 +    {
@@ -811,7 +839,9 @@ index 0000000..eeff29e
 +      any = true;
 +      continue;
 +    }
-+    if (addr >= XFMEM_SETCHAN0_AMBCOLOR && addr <= XFMEM_SETCHAN1_MATCOLOR && a[i] != b[i])
++    // Ambient / material colours are left as in frame N: blending them broke translucent
++    // objects (Phenac's red dome turned clear); fades come through the BP colours above.
++    if (false && addr >= XFMEM_SETCHAN0_AMBCOLOR && addr <= XFMEM_SETCHAN1_MATCOLOR && a[i] != b[i])
 +    {
 +      // Ambient / material colours (RGBA8): fades and flashes.
 +      const u32 ca = Common::swap32(a[i]), cb = Common::swap32(b[i]);
@@ -822,6 +852,12 @@ index 0000000..eeff29e
 +        c |= u32(std::clamp(std::lround(x + (y - x) * s_t), 0L, 255L)) << sh;
 +      }
 +      out[i] = Common::swap32(c);
++      if (static int dbg = std::getenv("COLO_INTERP_DBGCOL") ? 60 : 0; dbg > 0)
++      {
++        --dbg;
++        std::fprintf(stderr, "[interp] colour addr=%03x prev=%08x cur=%08x out=%08x sig=%016llx\n",
++                     addr, ca, cb, c, static_cast<unsigned long long>(e.signature));
++      }
 +      any = true;
 +      continue;
 +    }
@@ -856,12 +892,14 @@ index 0000000..eeff29e
 +    prev_index[Mix(Mix(p.address, p.count), p.signature)].push_back(i);
 +  }
 +
++  static const bool no_bp = std::getenv("COLO_INTERP_NOBP") != nullptr;
++  static const bool no_col = std::getenv("COLO_INTERP_NOCOL") != nullptr;
 +  auto interesting = [](const XFEvent& e) {
++    if ((no_bp && IsBPColorEvent(e.address)) || (no_col && IsColorEvent(e) && !IsBPColorEvent(e.address)))
++      return false;
 +    return e.count != 0 &&
 +           (e.address < XFMEM_LIGHTS_END ||
 +            (e.address >= XFMEM_SETPROJECTION && e.address < XFMEM_SETPROJECTION + 7) ||
-+            (e.address <= XFMEM_SETCHAN1_MATCOLOR &&
-+             e.address + e.count > XFMEM_SETCHAN0_AMBCOLOR) ||
 +            IsBPColorEvent(e.address));
 +  };
 +
@@ -893,7 +931,7 @@ index 0000000..eeff29e
 +      pick = static_cast<s32>(list[occurrence]);
 +      pick_dist = EventDistance(e, s_prev.events[pick]);
 +    }
-+    if (pick_dist > 0 && e.address < XFMEM_LIGHTS_END)
++    if (pick_dist > 0 && (e.address < XFMEM_LIGHTS_END || IsColorEvent(e)))
 +    {
 +      const u32 lo = occurrence > 32 ? occurrence - 32 : 0;
 +      const u32 hi = std::min<u32>(static_cast<u32>(list.size()), occurrence + 33);
@@ -932,14 +970,36 @@ index 0000000..eeff29e
 +    const u64 key = Mix(Mix(e.address, e.count), e.loose);
 +    const u32 occurrence = loose_seen[key]++;
 +    const auto it = loose_index.find(key);
-+    if (it == loose_index.end() || occurrence >= it->second.size())
++    // Nearest unused candidate within a window around the expected occurrence, so a UI piece
++    // that appears or disappears doesn't shift every later pairing by one.
++    s32 pick = -1;
++    if (it != loose_index.end())
++    {
++      const std::vector<u32>& list = it->second;
++      const u32 lo = occurrence > 32 ? occurrence - 32 : 0;
++      const u32 hi = std::min<u32>(static_cast<u32>(list.size()), occurrence + 33);
++      float best = 0.0f;
++      for (u32 c = lo; c < hi; ++c)
++      {
++        if (prev_used[list[c]])
++          continue;
++        const float dist = EventDistance(e, s_prev.events[list[c]]);
++        if (pick < 0 || dist < best)
++        {
++          pick = static_cast<s32>(list[c]);
++          best = dist;
++        }
++      }
++    }
++    if (pick < 0)
 +    {
 +      if (s_debug_frame)
 +        std::fprintf(stderr, "[interp] unmatched k=%u loose=%016llx addr=%03x n=%u sig=%016llx occ=%u\n", k, static_cast<unsigned long long>(e.loose), e.address,
 +                     e.count, static_cast<unsigned long long>(e.signature), occurrence);
 +      continue;
 +    }
-+    partner[k] = static_cast<s32>(it->second[occurrence]) | (1 << 30);
++    prev_used[pick] = true;
++    partner[k] = pick | (1 << 30);
 +  }
 +
 +  for (u32 k = 0; k < s_cur.events.size(); ++k)
@@ -966,6 +1026,9 @@ index 0000000..eeff29e
 +  for (Draw& d : s_cur.draws)
 +  {
 +    d.partner = -1;
++    static const bool no_vtx = std::getenv("COLO_INTERP_NOVTX") != nullptr;
++    if (no_vtx)
++      continue;
 +    if (d.pos_offset < 0 && d.col_offset[0] < 0 && d.col_offset[1] < 0)
 +      continue;
 +    const u32 occurrence = draw_seen[d.key]++;
@@ -1209,34 +1272,54 @@ index 0000000..eeff29e
 +
 +void Replay()
 +{
-+  const auto start = std::chrono::steady_clock::now();
-+  u64 matched = 0, total = 0;
-+  const bool ok = BuildInterpolation(&matched, &total);
-+  s_stat_events += total;
-+  s_stat_matched += matched;
-+  if (!ok)
-+  {
-+    ++s_stat_cuts;
++  // In-between frames needed before this one: it will be on screen for about as many fields
++  // as the last one, and each field gets PresentsPerField() presents.
++  const int count = std::clamp(s_fields_per_frame * s_presents_per_field.load() - 1, 0, 3);
++  if (count == 0)
 +    return;
-+  }
 +
++  const auto start = std::chrono::steady_clock::now();
++  std::vector<std::shared_ptr<TCacheEntry>> results;
 +  SaveGpuState(s_live_state);
-+  LoadGpuState(s_start_state);
++  for (int k = 1; k <= count; ++k)
++  {
++    s_t = s_t_override >= 0 ? s_t_override : static_cast<float>(k) / (count + 1);
++    u64 matched = 0, total = 0;
++    const bool ok = BuildInterpolation(&matched, &total);
++    if (k == 1)
++    {
++      s_stat_events += total;
++      s_stat_matched += matched;
++    }
++    if (!ok)
++    {
++      ++s_stat_cuts;
++      results.clear();
++      break;
++    }
 +
-+  s_replay_result.reset();
-+  g_replaying = true;
-+  ReplayCallback callback;
-+  OpcodeDecoder::Run(s_cur.commands.data(), static_cast<u32>(s_cur.commands.size()), callback);
-+  g_vertex_manager->Flush();
-+  g_replaying = false;
-+
++    LoadGpuState(s_start_state);
++    s_tlut_read = 0;
++    s_replay_result.reset();
++    g_replaying = true;
++    ReplayCallback callback;
++    OpcodeDecoder::Run(s_cur.commands.data(), static_cast<u32>(s_cur.commands.size()), callback);
++    g_vertex_manager->Flush();
++    g_replaying = false;
++    if (!s_replay_result)
++    {
++      results.clear();
++      break;
++    }
++    results.push_back(std::move(s_replay_result));
++  }
 +  LoadGpuState(s_live_state);
 +
-+  if (s_replay_result)
++  if (!results.empty())
 +  {
 +    Ready& slot = s_ready[s_ready_seq++ % s_ready.size()];
 +    slot.addr = s_pending_xfb_addr;
-+    slot.entry = std::move(s_replay_result);
++    slot.entries = std::move(results);
 +    ++s_stat_replayed;
 +  }
 +  s_stat_ms += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start)
@@ -1266,10 +1349,11 @@ index 0000000..eeff29e
 +    if (s_log && ++s_stat_frames % 120 == 0)
 +    {
 +      std::fprintf(stderr,
-+                   "[interp] frames=%u replayed=%u cuts=%u matched=%.1f%% avg=%.2f ms cmds=%zu KB\n",
++                   "[interp] frames=%u replayed=%u cuts=%u matched=%.1f%% avg=%.2f ms cmds=%zu KB fields/frame=%d presents/field=%d\n",
 +                   s_stat_frames, s_stat_replayed, s_stat_cuts,
 +                   s_stat_events ? 100.0 * s_stat_matched / s_stat_events : 0.0,
-+                   s_stat_replayed ? s_stat_ms / s_stat_replayed : 0.0, s_cur.commands.size() / 1024);
++                   s_stat_replayed ? s_stat_ms / s_stat_replayed : 0.0, s_cur.commands.size() / 1024,
++                   s_fields_per_frame, s_presents_per_field.load());
 +      s_stat_replayed = s_stat_cuts = 0;
 +      s_stat_events = s_stat_matched = 0;
 +      s_stat_ms = 0;
@@ -1298,7 +1382,7 @@ index 0000000..eeff29e
 +  {
 +    env_read = true;
 +    if (const char* t = std::getenv("COLO_INTERP_T"))
-+      s_t = static_cast<float>(std::atof(t));
++      s_t_override = static_cast<float>(std::atof(t));
 +    s_log = std::getenv("COLO_INTERP_LOG") != nullptr;
 +  }
 +}
@@ -1383,6 +1467,20 @@ index 0000000..eeff29e
 +  s_cur.draws.push_back(d);
 +}
 +
++void RecordTlut(const u8* data, u32 size)
++{
++  s_cur.tluts.insert(s_cur.tluts.end(), data, data + size);
++}
++
++bool ReplayTlut(u8* dest, u32 size)
++{
++  if (s_tlut_read + size > s_cur.tluts.size())
++    return false;
++  std::memcpy(dest, &s_cur.tluts[s_tlut_read], size);
++  s_tlut_read += size;
++  return true;
++}
++
 +void RecordBP(u8 reg, u32 value)
 +{
 +  if (reg < BP_TEV_COLOR_FIRST || reg > BP_TEV_COLOR_LAST)
@@ -1411,14 +1509,30 @@ index 0000000..eeff29e
 +  s_replay_result = std::move(entry);
 +}
 +
-+std::shared_ptr<TCacheEntry> TakeInterpolatedFrame(u32 xfb_addr)
++std::vector<std::shared_ptr<TCacheEntry>> TakeInterpolatedFrames(u32 xfb_addr)
 +{
 +  for (Ready& r : s_ready)
 +  {
-+    if (r.entry && r.addr == xfb_addr)
-+      return std::move(r.entry);
++    if (!r.entries.empty() && r.addr == xfb_addr)
++      return std::move(r.entries);
 +  }
 +  return {};
++}
++
++void SetPresentsPerField(int presents)
++{
++  s_presents_per_field.store(std::clamp(presents, 1, 4), std::memory_order_relaxed);
++}
++
++int PresentsPerField()
++{
++  return s_presents_per_field.load(std::memory_order_relaxed);
++}
++
++void NoteFieldsPerFrame(int fields)
++{
++  if (fields >= 1)
++    s_fields_per_frame = std::min(fields, 4);
 +}
 +
 +void Reset()
@@ -1431,17 +1545,17 @@ index 0000000..eeff29e
 +  s_cur.Clear();
 +  s_prev.Clear();
 +  for (Ready& r : s_ready)
-+    r.entry.reset();
++    r.entries.clear();
 +  s_replay_result.reset();
 +  UpdateHook();
 +}
 +}  // namespace FrameInterpolation
 diff --git a/Source/Core/VideoCommon/FrameInterpolation.h b/Source/Core/VideoCommon/FrameInterpolation.h
 new file mode 100644
-index 0000000..96ce801
+index 0000000..18d9d13
 --- /dev/null
 +++ b/Source/Core/VideoCommon/FrameInterpolation.h
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,65 @@
 +// Copyright 2026 Colosseum Native
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
@@ -1463,6 +1577,7 @@ index 0000000..96ce801
 +#pragma once
 +
 +#include <memory>
++#include <vector>
 +
 +#include "Common/CommonTypes.h"
 +
@@ -1485,12 +1600,23 @@ index 0000000..96ce801
 +void RecordDraw(u8 cmd_byte, u16 num_vertices);
 +void RecordBP(u8 reg, u32 value);
 +void OnLiveXFBCopy(u32 dest_addr);
++// Palette (TLUT) loads: recorded live, replayed from the recording instead of guest RAM.
++void RecordTlut(const u8* data, u32 size);
++bool ReplayTlut(u8* dest, u32 size);
 +
 +// Result of the replayed XFB copy.
 +void OnReplayXFBCopy(std::shared_ptr<TCacheEntry> entry);
 +
-+// Presenter: the in-between frame that goes before the XFB at xfb_addr, if there is one.
-+std::shared_ptr<TCacheEntry> TakeInterpolatedFrame(u32 xfb_addr);
++// Presenter: the in-between frames (in order) that go before the XFB at xfb_addr.
++std::vector<std::shared_ptr<TCacheEntry>> TakeInterpolatedFrames(u32 xfb_addr);
++
++// Presents per video field: 1 = 60 fps output, 2 = 120 fps output. Any thread.
++void SetPresentsPerField(int presents);
++int PresentsPerField();
++
++// Presenter, on each new game frame: how many fields the previous one lasted (2 when the
++// game runs at 30 fps).
++void NoteFieldsPerFrame(int fields);
 +
 +// Drop all recorded state (savestate load, backend change).
 +void Reset();
@@ -1602,7 +1728,7 @@ index fc6f896..2033825 100644
    }
  
 diff --git a/Source/Core/VideoCommon/Present.cpp b/Source/Core/VideoCommon/Present.cpp
-index 7c62730..b9b655e 100644
+index 7c62730..e6e1189 100644
 --- a/Source/Core/VideoCommon/Present.cpp
 +++ b/Source/Core/VideoCommon/Present.cpp
 @@ -17,6 +17,7 @@
@@ -1613,29 +1739,75 @@ index 7c62730..b9b655e 100644
  #include "VideoCommon/OnScreenUI.h"
  #include "VideoCommon/PostProcessing.h"
  #include "VideoCommon/VertexManagerBase.h"
-@@ -208,6 +209,21 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+@@ -208,6 +209,67 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
  
    auto& video_events = GetVideoEvents();
  
-+  // Frame interpolation: the in-between frame goes out at the field's time and the real frame
-+  // half a field later, so both are on screen for the same length of time.
-+  if (FrameInterpolation::IsEnabled())
++  // Frame interpolation. Each video field is split into M presents (M = 1 for 60 fps output,
++  // 2 for 120). A game frame lasting D fields gets D*M - 1 in-between frames rendered at
++  // t = 1/(D*M) ... and the real frame last, all spaced evenly, so motion is continuous both
++  // where the game runs at 60 (menus) and at 30 (the field).
++  if (FrameInterpolation::IsEnabled() && m_xfb_entry)
 +  {
++    const int presents = std::clamp(FrameInterpolation::PresentsPerField(), 1, 4);
 +    const double rate = Core::System::GetInstance().GetVideoInterface().GetTargetRefreshRate();
-+    const auto half = std::chrono::duration_cast<DT>(
-+        std::chrono::duration<double>(0.5 / std::clamp(rate, 20.0, 240.0)));
-+    present_info.intended_present_time = presentation_time + half;
-+    if (!is_duplicate && m_xfb_entry)
++    const auto slot = std::chrono::duration_cast<DT>(
++        std::chrono::duration<double>(1.0 / (std::clamp(rate, 20.0, 240.0) * presents)));
++    if (static const bool log = std::getenv("COLO_INTERP_LOG") != nullptr; log)
 +    {
-+      if (const RcTcacheEntry interp = FrameInterpolation::TakeInterpolatedFrame(xfb_addr))
-+        PresentInterpolated(interp, fb_width, fb_height, ticks, presentation_time);
++      static u32 swaps = 0, news = 0;
++      ++swaps;
++      news += is_duplicate ? 0 : 1;
++      if (swaps % 600 == 0)
++        std::fprintf(stderr, "[interp] vi swaps=%u new frames=%u addr=%08x\n", swaps, news, xfb_addr);
 +    }
++    if (!is_duplicate)
++    {
++      FrameInterpolation::NoteFieldsPerFrame(m_fields_since_frame);
++      m_fields_since_frame = 0;
++      m_interp_queue = FrameInterpolation::TakeInterpolatedFrames(xfb_addr);
++      // Debug (COLO_INTERP_DUMP=<folder>): every 30th frame, the previous real frame, the
++      // in-between frames and the new real frame.
++      if (static const char* dump = std::getenv("COLO_INTERP_DUMP"); dump)
++      {
++        static u32 n = 0;
++        if (n++ % 30 == 0 && m_prev_real && !m_interp_queue.empty())
++        {
++          m_prev_real->texture->Save(fmt::format("{}/f{:05}_prev.png", dump, n), 0);
++          for (size_t q = 0; q < m_interp_queue.size(); ++q)
++            m_interp_queue[q]->texture->Save(fmt::format("{}/f{:05}_interp{}.png", dump, n, q), 0);
++          m_xfb_entry->texture->Save(fmt::format("{}/f{:05}_real.png", dump, n), 0);
++        }
++        m_prev_real = m_xfb_entry;
++      }
++    }
++    for (int k = 0; k < presents; ++k)
++    {
++      const size_t index = static_cast<size_t>(m_fields_since_frame) * presents + k;
++      const TimePoint when = presentation_time + slot * k;
++      if (index < m_interp_queue.size())
++        PresentInterpolated(m_interp_queue[index], fb_width, fb_height, ticks, when);
++      else if (k + 1 < presents)
++        PresentInterpolated(m_xfb_entry, fb_width, fb_height, ticks, when);
++      else
++        present_info.intended_present_time = when;
++    }
++    ++m_fields_since_frame;
++    const bool last_is_real =
++        static_cast<size_t>(m_fields_since_frame) * presents > m_interp_queue.size();
++    if (!last_is_real)
++      return;
++    video_events.before_present_event.Trigger(present_info);
++    Present(&present_info);
++    ProcessFrameDumping(ticks);
++    video_events.after_present_event.Trigger(present_info);
++    return;
 +  }
 +
    video_events.before_present_event.Trigger(present_info);
  
    if (!is_duplicate || !g_ActiveConfig.bSkipPresentingDuplicateXFBs)
-@@ -219,6 +235,43 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+@@ -219,6 +281,35 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
    }
  }
  
@@ -1646,21 +1818,13 @@ index 7c62730..b9b655e 100644
 +    return;
 +  RcTcacheEntry real_entry = m_xfb_entry;
 +  const MathUtil::Rectangle<int> real_rect = m_xfb_rect;
-+  if (static const char* dump = std::getenv("COLO_INTERP_DUMP"); dump && real_entry)
++  if (entry != real_entry)
 +  {
-+    static u32 n = 0;
-+    if (n % 30 == 29)
-+      real_entry->texture->Save(fmt::format("{}/f{:05}_prev.png", dump, n + 2), 0);
-+    if (n++ % 30 == 0)
-+    {
-+      entry->texture->Save(fmt::format("{}/f{:05}_interp.png", dump, n), 0);
-+      real_entry->texture->Save(fmt::format("{}/f{:05}_real.png", dump, n), 0);
-+    }
++    m_xfb_entry = entry;
++    m_xfb_rect = MathUtil::Rectangle<int>(
++        0, 0, static_cast<int>(fb_width * entry->GetWidth() / entry->native_width),
++        static_cast<int>(fb_height * entry->GetHeight() / entry->native_height));
 +  }
-+  m_xfb_entry = entry;
-+  m_xfb_rect = MathUtil::Rectangle<int>(
-+      0, 0, static_cast<int>(fb_width * entry->GetWidth() / entry->native_width),
-+      static_cast<int>(fb_height * entry->GetHeight() / entry->native_height));
 +
 +  PresentInfo info{
 +      .frame_count = m_frame_count > 0 ? m_frame_count - 1 : 0,
@@ -1680,25 +1844,78 @@ index 7c62730..b9b655e 100644
  {
    if (m_immediate_swap_happened_this_field.exchange(true, std::memory_order_relaxed) &&
 diff --git a/Source/Core/VideoCommon/Present.h b/Source/Core/VideoCommon/Present.h
-index 91ba870..e4ba9a2 100644
+index 91ba870..d6be7f5 100644
 --- a/Source/Core/VideoCommon/Present.h
 +++ b/Source/Core/VideoCommon/Present.h
-@@ -110,6 +110,10 @@ public:
+@@ -15,6 +15,7 @@
+ #include <memory>
+ #include <mutex>
+ #include <tuple>
++#include <vector>
+ 
+ class AbstractTexture;
+ struct SurfaceInfo;
+@@ -110,6 +111,13 @@ public:
    const MathUtil::Rectangle<int>& GetTargetRectangle() const { return m_target_rectangle; }
  
  private:
 +  // Frame interpolation: shows `entry` (an in-between frame) in place of the current XFB.
 +  void PresentInterpolated(const RcTcacheEntry& entry, u32 fb_width, u32 fb_height, u64 ticks,
 +                           TimePoint when);
++  std::vector<RcTcacheEntry> m_interp_queue;
++  int m_fields_since_frame = 0;
++  RcTcacheEntry m_prev_real;  // debug dumps only
 +
    // Fetches the XFB texture from the texture cache.
    // Returns true the contents have changed since last time
    bool FetchXFB(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height, u64 ticks);
 diff --git a/Source/Core/VideoCommon/TextureCacheBase.cpp b/Source/Core/VideoCommon/TextureCacheBase.cpp
-index c5d6096..a9303c5 100644
+index c5d6096..a938209 100644
 --- a/Source/Core/VideoCommon/TextureCacheBase.cpp
 +++ b/Source/Core/VideoCommon/TextureCacheBase.cpp
-@@ -2658,6 +2658,37 @@ void TextureCacheBase::UninitializeXFBMemory(u8* dst, u32 stride, u32 bytes_per_
+@@ -41,6 +41,7 @@
+ #include "VideoCommon/Assets/TextureAssetUtils.h"
+ #include "VideoCommon/BPMemory.h"
+ #include "VideoCommon/FramebufferManager.h"
++#include "VideoCommon/FrameInterpolation.h"
+ #include "VideoCommon/GraphicsModSystem/Runtime/FBInfo.h"
+ #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
+ #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
+@@ -2195,6 +2196,15 @@ void TextureCacheBase::CopyRenderTargetToTexture(
+   bool copy_to_ram =
+       !(is_xfb_copy ? g_ActiveConfig.bSkipXFBCopyToRam : g_ActiveConfig.bSkipEFBCopyToRam) ||
+       !copy_to_vram;
++  // Frame interpolation's in-between frame: VRAM only, never guest RAM (the CPU is a frame
++  // ahead and may already use that memory for something else).
++  const bool interp_replay = FrameInterpolation::g_replaying;
++  if (interp_replay)
++  {
++    if (!copy_to_vram)
++      return;
++    copy_to_ram = false;
++  }
+ 
+   // tex_w and tex_h are the native size of the texture in the GC memory.
+   // The size scaled_* represents the emulated texture. Those differ
+@@ -2271,7 +2281,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(
+       }
+       if (skip == true)
+       {
+-        if (copy_to_ram)
++        if (copy_to_ram && !interp_replay)
+           UninitializeEFBMemory(dst, dstStride, bytes_per_row, num_blocks_y);
+         return;
+       }
+@@ -2416,7 +2426,7 @@ void TextureCacheBase::CopyRenderTargetToTexture(
+       }
+     }
+   }
+-  else
++  else if (!interp_replay)
+   {
+     if (is_xfb_copy)
+     {
+@@ -2658,6 +2668,37 @@ void TextureCacheBase::UninitializeXFBMemory(u8* dst, u32 stride, u32 bytes_per_
    }
  }
  

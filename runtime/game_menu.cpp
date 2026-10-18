@@ -17,6 +17,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <fmt/format.h>
@@ -147,11 +148,15 @@ void WriteGameOption(const std::string& key, const std::string& value)
 // 0: 30 fps (original), 1: 60 fps, 2: 120 fps (60 + an interpolated frame between each pair).
 int s_fps_mode = 1;
 constexpr const char* kFpsValues[] = {"30", "60", "120"};
-constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps", "120 fps (interpolated)"};
+constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps (smooth)", "120 fps (smooth)"};
 
 void ApplyInterpolation()
 {
-  FrameInterpolation::SetEnabled(s_fps_mode == 2);
+  // The game's own logic always runs at its original rate (30 in the field, 60 in menus):
+  // forcing 60 fps logic soft-locked scripted scenes (Phenac's mayor). Smoothness comes from
+  // rendered in-between frames: 1 present per video field for 60 fps, 2 for 120.
+  FrameInterpolation::SetPresentsPerField(s_fps_mode == 2 ? 2 : 1);
+  FrameInterpolation::SetEnabled(s_fps_mode != 0);
 }
 int s_aspect = 1;  // index into kAspects
 
@@ -168,6 +173,15 @@ void LoadGameOptions()
 
 // Write the settings bytes straight into game memory so they take effect immediately;
 // the launcher writes the same bytes into main.dol at the next start.
+std::array<u8, 8> WantedGameSettings()
+{
+  u32 bits;
+  std::memcpy(&bits, &kAspects[s_aspect].multiplier, 4);
+  // Byte 0: original frame pacing (see ApplyInterpolation).
+  return {0xFF, 0, 0, 0, static_cast<u8>(bits >> 24), static_cast<u8>(bits >> 16),
+          static_cast<u8>(bits >> 8), static_cast<u8>(bits)};
+}
+
 void PokeGameSettings()
 {
   auto& system = Core::System::GetInstance();
@@ -177,13 +191,24 @@ void PokeGameSettings()
   u8* p = system.GetMemory().GetPointerForRange(kSettingsAddr, 8);
   if (!p)
     return;
-  p[0] = s_fps_mode == 0 ? 0xFF : 0x00;
-  u32 bits;
-  std::memcpy(&bits, &kAspects[s_aspect].multiplier, 4);
-  p[4] = static_cast<u8>(bits >> 24);
-  p[5] = static_cast<u8>(bits >> 16);
-  p[6] = static_cast<u8>(bits >> 8);
-  p[7] = static_cast<u8>(bits);
+  const auto wanted = WantedGameSettings();
+  std::memcpy(p, wanted.data(), wanted.size());
+}
+
+// Save states keep the settings bytes they were made with (older builds forced 60 fps
+// game logic), so check them now and then and put the current ones back.
+void KeepGameSettings()
+{
+  static u32 n = 0;
+  if (n++ % 30 != 0)
+    return;
+  auto& system = Core::System::GetInstance();
+  if (Core::GetState(system) != Core::State::Running)
+    return;
+  const u8* p = system.GetMemory().GetPointerForRange(kSettingsAddr, 8);
+  const auto wanted = WantedGameSettings();
+  if (p && std::memcmp(p, wanted.data(), wanted.size()) != 0)
+    PokeGameSettings();
 }
 
 void ApplyDolphinAspect()
@@ -433,11 +458,19 @@ std::vector<Item> BuildItems()
   items.push_back({"Save state", "", false, true, [](int) {
                      // Dolphin doesn't create the folder itself; without it the save fails.
                      File::CreateFullPath(File::GetUserPath(D_STATESAVES_IDX));
-                     State::Save(Core::System::GetInstance(), s_state_slot);
+                     // The menu draws inside the emulated video interrupt on the CPU thread,
+                     // where Dolphin would save immediately: the VI event is mid-flight then
+                     // and the state comes back without it (the game hangs after loading).
+                     // From another thread, Dolphin pauses the CPU at a safe point first.
+                     std::thread([slot = s_state_slot] {
+                       State::Save(Core::System::GetInstance(), slot);
+                     }).detach();
                      SetStatus(fmt::format("Saved state {}", s_state_slot));
                    }});
   items.push_back({"Load state", "", false, true, [](int) {
-                     State::Load(Core::System::GetInstance(), s_state_slot);
+                     std::thread([slot = s_state_slot] {
+                       State::Load(Core::System::GetInstance(), slot);
+                     }).detach();
                      SetStatus(fmt::format("Loaded state {}", s_state_slot));
                      s_open = false;
                    }});
@@ -595,6 +628,8 @@ void Draw()
     }
     OSD::AddMessage("Settings: Esc or F1 (controller: View button)", 8000);
   }
+
+  KeepGameSettings();
 
   std::vector<Key> keys;
   {
