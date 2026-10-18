@@ -66,7 +66,7 @@ cmake -S "$MG/vendor/dolphin/module-template" -B "$work/module-win" -G Ninja -DC
   -DCMAKE_TOOLCHAIN_FILE="$TC" -DGAME_ID=GC6E01 -DGENERATED_DIR="$here/recomp/generated" \
   -DGXRUNTIME_DIR="$MG/vendor/dolphin/GXRuntime" \
   -DCHASSIS_ABI_DIR="$MG/vendor/dolphin/Source/Core/Core/PowerPC/StaticRecomp" \
-  -DCMAKE_C_FLAGS="-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A00000C -idirafter $CASE_SHIM -march=x86-64-v2" \
+  -DCMAKE_C_FLAGS="-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A00000C -idirafter $CASE_SHIM -march=x86-64-v2 -DGXRUNTIME_GAMECUBE_ONLY -DGXRUNTIME_RAM_SIZE=0x01800000u -DGXRUNTIME_NO_WRITE_JOURNAL" \
   -DRECOMPCORE_MODULE_ENABLE_IPO=ON -DRECOMPCORE_MODULE_OPT_LEVEL=3 -DPython3_EXECUTABLE="$(command -v python3)"
 # -O3 + ThinLTO + x86-64-v2 (SSE4.2/POPCNT; every Windows 11 PC) is about 10% faster than
 # -O2 on the game code. FP contraction stays off (module template), so results don't change.
