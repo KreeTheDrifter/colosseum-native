@@ -29,6 +29,17 @@ index 0a952a0..895093d 100644
  
                  // Uncomment the line below if you don't want to build the C++ unit tests
                  //targets("main", "hook_impl", "main_hook", "gsl_alloc_hook", "file_redirect_hook")
+diff --git a/Source/Android/app/proguard-rules.pro b/Source/Android/app/proguard-rules.pro
+index ef5e934..4399d72 100644
+--- a/Source/Android/app/proguard-rules.pro
++++ b/Source/Android/app/proguard-rules.pro
+@@ -17,3 +17,6 @@
+ -keep class androidx.core.util.Pair {
+     <init>(java.lang.Object, java.lang.Object);
+ }
++
++# Colosseum Native: called from native code (in-game menu).
++-keep class org.dolphinemu.dolphinemu.colosseum.** { *; }
 diff --git a/Source/Android/app/src/main/AndroidManifest.xml b/Source/Android/app/src/main/AndroidManifest.xml
 index 3218ed3..6db8768 100644
 --- a/Source/Android/app/src/main/AndroidManifest.xml
@@ -125,10 +136,10 @@ index e4698ba..eebb5a5 100644
          doneButton?.setOnClickListener { stopConfiguringControls() }
  
 diff --git a/Source/Android/jni/CMakeLists.txt b/Source/Android/jni/CMakeLists.txt
-index a15eb5c..c07c915 100644
+index a15eb5c..57a1c24 100644
 --- a/Source/Android/jni/CMakeLists.txt
 +++ b/Source/Android/jni/CMakeLists.txt
-@@ -34,6 +34,9 @@ add_library(main SHARED
+@@ -34,15 +34,27 @@ add_library(main SHARED
    RiivolutionPatches.cpp
    SkylanderConfig.cpp
    WiiUtils.cpp
@@ -137,8 +148,16 @@ index a15eb5c..c07c915 100644
 +  colosseum/game_menu.cpp
  )
  
++# Colosseum Native: the StaticRecomp core raises PowerPC exceptions through GXRuntime
++# (ModernGekko links the same file into core on desktop).
++add_library(colosseum_gxruntime_core STATIC ${CMAKE_SOURCE_DIR}/GXRuntime/src/core/cpu_exception.c)
++target_include_directories(colosseum_gxruntime_core PUBLIC ${CMAKE_SOURCE_DIR}/GXRuntime/include)
++
  target_link_libraries(main
-@@ -43,6 +46,9 @@ PRIVATE
+ PRIVATE
++  colosseum_gxruntime_core
+   androidcommon
+   common
    core
    inputcommon
    uicommon
@@ -148,7 +167,7 @@ index a15eb5c..c07c915 100644
  )
  
  target_link_libraries(main
-@@ -56,6 +62,7 @@ PRIVATE
+@@ -56,6 +68,7 @@ PRIVATE
  
  target_include_directories(main
  PRIVATE
