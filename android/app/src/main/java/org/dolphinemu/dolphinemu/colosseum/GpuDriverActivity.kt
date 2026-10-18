@@ -90,7 +90,7 @@ class GpuDriverActivity : AppCompatActivity() {
             radius = 16 * dp
             if (highlight) {
                 strokeWidth = (2 * dp).toInt()
-                strokeColor = MaterialColors.getColor(this, com.google.android.material.R.attr.colorPrimary)
+                strokeColor = MaterialColors.getColor(this, android.R.attr.colorPrimary)
             }
             addView(inner)
             layoutParams = LinearLayout.LayoutParams(
