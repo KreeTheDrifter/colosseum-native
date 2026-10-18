@@ -33,6 +33,8 @@ if [ ! -d "$T/lib/ModernGekko/vendor/dolphin/Source" ]; then
   # MinGW build fixes, in-game menu hooks (overlay, input routing, input gate).
   (cd "$T/lib/ModernGekko" && git apply "$here/patches/moderngekko.patch")
   (cd "$T/lib/ModernGekko/vendor/dolphin" && git apply "$here/patches/dolphin.patch")
+  # Recompiler: let cache ops fall through, skip redundant pc stores.
+  (cd "$T/lib/DolRecomp" && git apply "$here/patches/dolrecomp.patch")
 fi
 MG="$T/lib/ModernGekko"
 mkdir -p "$MG/src/frontend"

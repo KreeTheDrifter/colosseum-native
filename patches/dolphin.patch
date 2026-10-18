@@ -1,3 +1,426 @@
+diff --git a/GXRuntime/include/core/cpu.h b/GXRuntime/include/core/cpu.h
+index e242b00..6518afd 100644
+--- a/GXRuntime/include/core/cpu.h
++++ b/GXRuntime/include/core/cpu.h
+@@ -174,6 +174,7 @@ extern void* g_mem_write_journal_user;
+ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size, u32* out_offset) {
+     u32 masked_addr = addr & ~0x40000000u;
+     
++#if !defined(GXRUNTIME_GAMECUBE_ONLY)
+     // Check MEM2 (EXRAM) first as it is much more common in Wii titles
+     if (cpu->exram) {
+         u32 offset = masked_addr - 0x90000000u;
+@@ -183,9 +184,16 @@ static GXRUNTIME_ALWAYS_INLINE u8* get_ram_ptr(CPUState* cpu, u32 addr, u32 size
+         }
+     }
+     
++#endif
+     // Check MEM1
+     u32 offset = masked_addr - 0x80000000u;
++#if defined(GXRUNTIME_RAM_SIZE)
++    // GameCube builds (GXRUNTIME_GAMECUBE_ONLY, GXRUNTIME_RAM_SIZE=0x01800000): no MEM2 and a
++    // fixed 24 MB MEM1, so the bounds check needs no loads from cpu.
++    if (offset <= (u32)(GXRUNTIME_RAM_SIZE) - size) {
++#else
+     if (offset <= cpu->ram_size - size) {
++#endif
+         if (out_offset) *out_offset = offset;
+         return cpu->ram + offset;
+     }
+@@ -220,7 +228,9 @@ static GXRUNTIME_ALWAYS_INLINE void mem_write64(CPUState* cpu, u32 addr, u64 val
+         return;
+     }
+     clear_matching_reservation(cpu, addr);
++#if !defined(GXRUNTIME_NO_WRITE_JOURNAL)
+     if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 8, g_mem_write_journal_user);
++#endif
+     write_be64(ptr, value);
+ }
+ 
+@@ -244,7 +254,9 @@ static GXRUNTIME_ALWAYS_INLINE void mem_write32(CPUState* cpu, u32 addr, u32 val
+         return;
+     }
+     clear_matching_reservation(cpu, addr);
++#if !defined(GXRUNTIME_NO_WRITE_JOURNAL)
+     if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 4, g_mem_write_journal_user);
++#endif
+     write_be32(ptr, value);
+ }
+ 
+@@ -268,7 +280,9 @@ static GXRUNTIME_ALWAYS_INLINE void mem_write16(CPUState* cpu, u32 addr, u16 val
+         return;
+     }
+     clear_matching_reservation(cpu, addr);
++#if !defined(GXRUNTIME_NO_WRITE_JOURNAL)
+     if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 2, g_mem_write_journal_user);
++#endif
+     write_be16(ptr, value);
+ }
+ 
+@@ -292,7 +306,9 @@ static GXRUNTIME_ALWAYS_INLINE void mem_write8(CPUState* cpu, u32 addr, u8 value
+         return;
+     }
+     clear_matching_reservation(cpu, addr);
++#if !defined(GXRUNTIME_NO_WRITE_JOURNAL)
+     if (g_mem_write_journal && offset != (u32)-1) g_mem_write_journal(offset, 1, g_mem_write_journal_user);
++#endif
+     *ptr = value;
+ }
+ 
+@@ -453,6 +469,8 @@ void ppc_tlbie(CPUState* cpu, u32 ea, u32 cia);
+ void ppc_fpscr_updated(CPUState* cpu);
+ void ppc_memory_fence(void);
+ 
++#include "cpu_float_fast.h"
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/GXRuntime/include/core/cpu_float_fast.h b/GXRuntime/include/core/cpu_float_fast.h
+new file mode 100644
+index 0000000..9d275a9
+--- /dev/null
++++ b/GXRuntime/include/core/cpu_float_fast.h
+@@ -0,0 +1,285 @@
++/* Inline fast paths for the hottest floating-point helpers (Colosseum Native).
++ *
++ * Enabled for module builds with -DGXRUNTIME_INLINE_FLOAT. Generated code calls ppc_fadds(),
++ * ppc_fma() and friends thousands of times per frame; each call goes through several
++ * out-of-line layers (ni_add -> force_single -> fp_write_single -> classify/set_fprf). These
++ * wrappers compute the common case in place -- finite inputs and result, no NI (flush) mode,
++ * no 25-bit-rounding denormal or FMA tie case -- with exactly the operations the out-of-line
++ * code performs, and otherwise call the original helper with the untouched inputs, so results
++ * and FPSCR updates are identical either way.
++ *
++ * Included at the end of cpu.h; the GXRuntime sources that define the helpers set
++ * GXRUNTIME_BUILDING_CORE so the redirecting macros don't touch their definitions. */
++#pragma once
++
++#if defined(GXRUNTIME_INLINE_FLOAT) && !defined(GXRUNTIME_BUILDING_CORE)
++
++#include <math.h>
++#include <string.h>
++
++#define GXRT_FPSCR_FI 0x00020000u
++#define GXRT_FPSCR_FR 0x00040000u
++#define GXRT_FPSCR_NI 0x00000004u
++
++#if defined(_MSC_VER)
++#define GXRT_FF_INLINE __forceinline
++#elif defined(__GNUC__) || defined(__clang__)
++#define GXRT_FF_INLINE inline __attribute__((always_inline))
++#else
++#define GXRT_FF_INLINE inline
++#endif
++
++#if defined(__GNUC__) || defined(__clang__)
++#define GXRT_UNLIKELY(x) __builtin_expect(!!(x), 0)
++#else
++#define GXRT_UNLIKELY(x) (x)
++#endif
++
++static GXRT_FF_INLINE u64 gxrt_f64_bits(f64 v) { u64 b; memcpy(&b, &v, 8); return b; }
++static GXRT_FF_INLINE f64 gxrt_f64_from(u64 b) { f64 v; memcpy(&v, &b, 8); return v; }
++
++static GXRT_FF_INLINE u32 gxrt_classify_f32(f32 value) {
++    u32 bits;
++    memcpy(&bits, &value, sizeof(bits));
++    u32 sign = bits >> 31;
++    u32 exponent = bits & 0x7F800000u;
++    u32 fraction = bits & 0x007FFFFFu;
++    if (exponent == 0x7F800000u)
++        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
++    if (exponent == 0)
++        return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
++    return sign ? 0x08u : 0x04u;
++}
++
++static GXRT_FF_INLINE u32 gxrt_classify_f64(f64 value) {
++    u64 bits = gxrt_f64_bits(value);
++    u64 sign = bits >> 63;
++    u64 exponent = bits & 0x7FF0000000000000ull;
++    u64 fraction = bits & 0x000FFFFFFFFFFFFFull;
++    if (exponent == 0x7FF0000000000000ull)
++        return fraction ? 0x11u : (sign ? 0x09u : 0x05u);
++    if (exponent == 0)
++        return fraction ? (sign ? 0x18u : 0x14u) : (sign ? 0x12u : 0x02u);
++    return sign ? 0x08u : 0x04u;
++}
++
++static GXRT_FF_INLINE void gxrt_set_fprf(CPUState* cpu, u32 value) {
++    cpu->fpscr = (cpu->fpscr & ~(0x1Fu << 12)) | ((value & 0x1Fu) << 12);
++}
++
++/* force_25bit_c / force_25_bit for anything that isn't a denormal (both agree there). */
++static GXRT_FF_INLINE bool gxrt_is_denormal(f64 v) {
++    u64 bits = gxrt_f64_bits(v);
++    return (bits & 0x7FF0000000000000ull) == 0 && (bits & 0x000FFFFFFFFFFFFFull) != 0;
++}
++static GXRT_FF_INLINE f64 gxrt_round_25(f64 v) {
++    u64 bits = gxrt_f64_bits(v);
++    return gxrt_f64_from((bits & 0xFFFFFFFFF8000000ull) + (bits & 0x8000000ull));
++}
++
++static GXRT_FF_INLINE void gxrt_write_single(CPUState* cpu, u8 d, f64 value) {
++    f32 rounded = (f32)value;
++    cpu->fpr[d] = (f64)rounded;
++    cpu->ps1[d] = (f64)rounded;
++    gxrt_set_fprf(cpu, gxrt_classify_f32(rounded));
++}
++
++/* ---- scalar single ---------------------------------------------------------------------- */
++static GXRT_FF_INLINE void ppc_fadds_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 x = cpu->fpr[a], y = cpu->fpr[b], r = x + y;
++    if (GXRT_UNLIKELY(!isfinite(r) || !isfinite(x) || !isfinite(y) || (cpu->fpscr & GXRT_FPSCR_NI))) {
++        (ppc_fadds)(cpu, d, a, b);
++        return;
++    }
++    gxrt_write_single(cpu, d, r);
++}
++
++static GXRT_FF_INLINE void ppc_fsubs_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 x = cpu->fpr[a], y = cpu->fpr[b], r = x - y;
++    if (GXRT_UNLIKELY(!isfinite(r) || !isfinite(x) || !isfinite(y) || (cpu->fpscr & GXRT_FPSCR_NI))) {
++        (ppc_fsubs)(cpu, d, a, b);
++        return;
++    }
++    gxrt_write_single(cpu, d, r);
++}
++
++static GXRT_FF_INLINE void ppc_fmuls_fast(CPUState* cpu, u8 d, u8 a, u8 c) {
++    f64 x = cpu->fpr[a], z = cpu->fpr[c];
++    if (GXRT_UNLIKELY(gxrt_is_denormal(z) || (cpu->fpscr & GXRT_FPSCR_NI))) {
++        (ppc_fmuls)(cpu, d, a, c);
++        return;
++    }
++    f64 r = x * gxrt_round_25(z);
++    if (GXRT_UNLIKELY(isnan(r))) {
++        (ppc_fmuls)(cpu, d, a, c);
++        return;
++    }
++    gxrt_write_single(cpu, d, r);
++    cpu->fpscr &= ~(GXRT_FPSCR_FI | GXRT_FPSCR_FR);
++}
++
++/* ---- scalar double ---------------------------------------------------------------------- */
++static GXRT_FF_INLINE void ppc_fadd_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 x = cpu->fpr[a], y = cpu->fpr[b], r = x + y;
++    if (GXRT_UNLIKELY(!isfinite(r) || !isfinite(x) || !isfinite(y))) {
++        (ppc_fadd)(cpu, d, a, b);
++        return;
++    }
++    cpu->fpr[d] = r;
++    gxrt_set_fprf(cpu, gxrt_classify_f64(r));
++}
++
++static GXRT_FF_INLINE void ppc_fsub_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 x = cpu->fpr[a], y = cpu->fpr[b], r = x - y;
++    if (GXRT_UNLIKELY(!isfinite(r) || !isfinite(x) || !isfinite(y))) {
++        (ppc_fsub)(cpu, d, a, b);
++        return;
++    }
++    cpu->fpr[d] = r;
++    gxrt_set_fprf(cpu, gxrt_classify_f64(r));
++}
++
++static GXRT_FF_INLINE void ppc_fmul_fast(CPUState* cpu, u8 d, u8 a, u8 c) {
++    f64 r = cpu->fpr[a] * cpu->fpr[c];
++    if (GXRT_UNLIKELY(isnan(r))) {
++        (ppc_fmul)(cpu, d, a, c);
++        return;
++    }
++    cpu->fpr[d] = r;
++    gxrt_set_fprf(cpu, gxrt_classify_f64(r));
++    cpu->fpscr &= ~(GXRT_FPSCR_FI | GXRT_FPSCR_FR);
++}
++
++/* ---- compare ---------------------------------------------------------------------------- */
++static GXRT_FF_INLINE void ppc_fcmp_fast(CPUState* cpu, u8 crfd, f64 a, f64 b, bool ordered) {
++    if (GXRT_UNLIKELY(isnan(a) || isnan(b))) {
++        (ppc_fcmp)(cpu, crfd, a, b, ordered);
++        return;
++    }
++    u32 compare = a < b ? 0x8u : a > b ? 0x4u : 0x2u;
++    cpu->fpscr = (cpu->fpscr & ~(0xFu << 12)) | (compare << 12);
++    u32 shift = 4u * (7u - crfd);
++    cpu->cr = (cpu->cr & ~(0xFu << shift)) | (compare << shift);
++}
++
++/* ---- fused multiply-add (fmadd/fmsub/fnmadd/fnmsub, single and double) -------------------- */
++static GXRT_FF_INLINE bool ppc_fma_fast(CPUState* cpu, f64 a, f64 c, f64 b, bool single,
++                                                 bool subtract, bool negative, f64* output) {
++    if (GXRT_UNLIKELY(!isfinite(a) || !isfinite(b) || !isfinite(c)))
++        return (ppc_fma)(cpu, a, c, b, single, subtract, negative, output);
++    f64 addend = subtract ? -b : b;
++    f64 result;
++    if (!single) {
++        result = fma(a, c, addend);
++    } else {
++        if (GXRT_UNLIKELY(gxrt_is_denormal(c)))
++            return (ppc_fma)(cpu, a, c, b, single, subtract, negative, output);
++        result = fma(a, gxrt_round_25(c), addend);
++        if (GXRT_UNLIKELY((gxrt_f64_bits(result) & 0x000000001FFFFFFFull) == 0x0000000010000000ull))
++            return (ppc_fma)(cpu, a, c, b, single, subtract, negative, output);
++        result = (f64)(f32)result;
++    }
++    if (GXRT_UNLIKELY(isnan(result)))
++        return (ppc_fma)(cpu, a, c, b, single, subtract, negative, output);
++    if (negative)
++        result = -result;
++    gxrt_set_fprf(cpu, single ? gxrt_classify_f32((f32)result) : gxrt_classify_f64(result));
++    *output = result;
++    return true;
++}
++
++/* ---- paired singles --------------------------------------------------------------------- */
++static GXRT_FF_INLINE bool gxrt_ps_args_ok(const CPUState* cpu, f64 a, f64 b) {
++    return isfinite(a) && isfinite(b) && (cpu->fpscr & GXRT_FPSCR_NI) == 0;
++}
++
++static GXRT_FF_INLINE void ppc_ps_add_op_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 a0 = cpu->fpr[a], b0 = cpu->fpr[b], a1 = cpu->ps1[a], b1 = cpu->ps1[b];
++    f64 r0 = a0 + b0, r1 = a1 + b1;
++    if (GXRT_UNLIKELY(!gxrt_ps_args_ok(cpu, a0, b0) || !gxrt_ps_args_ok(cpu, a1, b1) ||
++                      isnan(r0) || isnan(r1))) {
++        (ppc_ps_add_op)(cpu, d, a, b);
++        return;
++    }
++    f32 ps0 = (f32)r0, ps1 = (f32)r1;
++    cpu->fpr[d] = (f64)ps0;
++    cpu->ps1[d] = (f64)ps1;
++    gxrt_set_fprf(cpu, gxrt_classify_f32(ps0));
++}
++
++static GXRT_FF_INLINE void ppc_ps_sub_op_fast(CPUState* cpu, u8 d, u8 a, u8 b) {
++    f64 a0 = cpu->fpr[a], b0 = cpu->fpr[b], a1 = cpu->ps1[a], b1 = cpu->ps1[b];
++    f64 r0 = a0 - b0, r1 = a1 - b1;
++    if (GXRT_UNLIKELY(!gxrt_ps_args_ok(cpu, a0, b0) || !gxrt_ps_args_ok(cpu, a1, b1) ||
++                      isnan(r0) || isnan(r1))) {
++        (ppc_ps_sub_op)(cpu, d, a, b);
++        return;
++    }
++    f32 ps0 = (f32)r0, ps1 = (f32)r1;
++    cpu->fpr[d] = (f64)ps0;
++    cpu->ps1[d] = (f64)ps1;
++    gxrt_set_fprf(cpu, gxrt_classify_f32(ps0));
++}
++
++static GXRT_FF_INLINE void ppc_ps_mul_op_fast(CPUState* cpu, u8 d, u8 a, u8 c) {
++    f64 a0 = cpu->fpr[a], c0 = cpu->fpr[c], a1 = cpu->ps1[a], c1 = cpu->ps1[c];
++    if (GXRT_UNLIKELY(gxrt_is_denormal(c0) || gxrt_is_denormal(c1) ||
++                      (cpu->fpscr & GXRT_FPSCR_NI))) {
++        (ppc_ps_mul_op)(cpu, d, a, c);
++        return;
++    }
++    f64 r0 = a0 * gxrt_round_25(c0), r1 = a1 * gxrt_round_25(c1);
++    if (GXRT_UNLIKELY(isnan(r0) || isnan(r1))) {
++        (ppc_ps_mul_op)(cpu, d, a, c);
++        return;
++    }
++    f32 ps0 = (f32)r0, ps1 = (f32)r1;
++    cpu->fpr[d] = (f64)ps0;
++    cpu->ps1[d] = (f64)ps1;
++    gxrt_set_fprf(cpu, gxrt_classify_f32(ps0));
++}
++
++static GXRT_FF_INLINE void ppc_ps_madd_op_fast(CPUState* cpu, u8 d, u8 a, u8 c, u8 b,
++                                                       bool subtract, bool negative) {
++    f64 a0 = cpu->fpr[a], c0 = cpu->fpr[c], b0 = cpu->fpr[b];
++    f64 a1 = cpu->ps1[a], c1 = cpu->ps1[c], b1 = cpu->ps1[b];
++    if (GXRT_UNLIKELY(!isfinite(a0) || !isfinite(c0) || !isfinite(b0) || !isfinite(a1) ||
++                      !isfinite(c1) || !isfinite(b1) || gxrt_is_denormal(c0) ||
++                      gxrt_is_denormal(c1) || (cpu->fpscr & GXRT_FPSCR_NI))) {
++        (ppc_ps_madd_op)(cpu, d, a, c, b, subtract, negative);
++        return;
++    }
++    f64 r0 = fma(a0, gxrt_round_25(c0), subtract ? -b0 : b0);
++    f64 r1 = fma(a1, gxrt_round_25(c1), subtract ? -b1 : b1);
++    const u64 kMask = 0x000000001FFFFFFFull, kTie = 0x0000000010000000ull;
++    if (GXRT_UNLIKELY(isnan(r0) || isnan(r1) || (gxrt_f64_bits(r0) & kMask) == kTie ||
++                      (gxrt_f64_bits(r1) & kMask) == kTie)) {
++        (ppc_ps_madd_op)(cpu, d, a, c, b, subtract, negative);
++        return;
++    }
++    f32 ps0 = (f32)r0, ps1 = (f32)r1;
++    if (negative) {
++        ps0 = -ps0;
++        ps1 = -ps1;
++    }
++    cpu->fpr[d] = (f64)ps0;
++    cpu->ps1[d] = (f64)ps1;
++    gxrt_set_fprf(cpu, gxrt_classify_f32(ps0));
++}
++
++#define ppc_fadds(cpu, d, a, b) ppc_fadds_fast(cpu, d, a, b)
++#define ppc_fsubs(cpu, d, a, b) ppc_fsubs_fast(cpu, d, a, b)
++#define ppc_fmuls(cpu, d, a, c) ppc_fmuls_fast(cpu, d, a, c)
++#define ppc_fadd(cpu, d, a, b) ppc_fadd_fast(cpu, d, a, b)
++#define ppc_fsub(cpu, d, a, b) ppc_fsub_fast(cpu, d, a, b)
++#define ppc_fmul(cpu, d, a, c) ppc_fmul_fast(cpu, d, a, c)
++#define ppc_fcmp(cpu, crfd, a, b, ordered) ppc_fcmp_fast(cpu, crfd, a, b, ordered)
++#define ppc_fma(cpu, a, c, b, single, subtract, negative, output) \
++    ppc_fma_fast(cpu, a, c, b, single, subtract, negative, output)
++#define ppc_ps_add_op(cpu, d, a, b) ppc_ps_add_op_fast(cpu, d, a, b)
++#define ppc_ps_sub_op(cpu, d, a, b) ppc_ps_sub_op_fast(cpu, d, a, b)
++#define ppc_ps_mul_op(cpu, d, a, c) ppc_ps_mul_op_fast(cpu, d, a, c)
++#define ppc_ps_madd_op(cpu, d, a, c, b, subtract, negative) \
++    ppc_ps_madd_op_fast(cpu, d, a, c, b, subtract, negative)
++
++#endif
+diff --git a/GXRuntime/src/core/cpu.c b/GXRuntime/src/core/cpu.c
+index 345b960..e169e82 100644
+--- a/GXRuntime/src/core/cpu.c
++++ b/GXRuntime/src/core/cpu.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ // SPDX-License-Identifier: GPL-3.0-or-later
+ #include "core/cpu.h"
+ #include <stdio.h>
+diff --git a/GXRuntime/src/core/cpu_exception.c b/GXRuntime/src/core/cpu_exception.c
+index a61288c..947f8ba 100644
+--- a/GXRuntime/src/core/cpu_exception.c
++++ b/GXRuntime/src/core/cpu_exception.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ #include "core/cpu.h"
+ 
+ static u32 exception_vector_address(u32 msr, u32 vector) {
+diff --git a/GXRuntime/src/core/cpu_interpreter.c b/GXRuntime/src/core/cpu_interpreter.c
+index 7c95c64..323b0be 100644
+--- a/GXRuntime/src/core/cpu_interpreter.c
++++ b/GXRuntime/src/core/cpu_interpreter.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ #include "cpu_interpreter_private.h"
+ 
+ void ppc_memory_fence(void) {
+diff --git a/GXRuntime/src/core/cpu_interpreter_float.c b/GXRuntime/src/core/cpu_interpreter_float.c
+index a73f961..bddef6d 100644
+--- a/GXRuntime/src/core/cpu_interpreter_float.c
++++ b/GXRuntime/src/core/cpu_interpreter_float.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ #include "cpu_interpreter_private.h"
+ #include <string.h>
+ 
+diff --git a/GXRuntime/src/core/cpu_interpreter_integer.c b/GXRuntime/src/core/cpu_interpreter_integer.c
+index 38564ee..9aa4e2f 100644
+--- a/GXRuntime/src/core/cpu_interpreter_integer.c
++++ b/GXRuntime/src/core/cpu_interpreter_integer.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ #include "cpu_interpreter_private.h"
+ 
+ u32 ppc_mfspr(CPUState* cpu, u16 spr, u32 cia) {
+diff --git a/GXRuntime/src/core/cpu_interpreter_table.c b/GXRuntime/src/core/cpu_interpreter_table.c
+index b23de0a..e9fc2c3 100644
+--- a/GXRuntime/src/core/cpu_interpreter_table.c
++++ b/GXRuntime/src/core/cpu_interpreter_table.c
+@@ -1,3 +1,4 @@
++#define GXRUNTIME_BUILDING_CORE 1  /* no inline-float redirects in the helpers themselves */
+ #include "cpu_interpreter_private.h"
+ 
+ const EstimateEntry frsqrte_table[32] = {
 diff --git a/Source/Core/Core/CoreTiming.cpp b/Source/Core/Core/CoreTiming.cpp
 index 26e9973..acebb5b 100644
 --- a/Source/Core/Core/CoreTiming.cpp
@@ -78,17 +501,103 @@ index 6bf762a..60de51a 100644
    explicit VideoInterfaceManager(Core::System& system);
    VideoInterfaceManager(const VideoInterfaceManager&) = delete;
    VideoInterfaceManager(VideoInterfaceManager&&) = delete;
+diff --git a/Source/Core/Core/PowerPC/JitInterface.cpp b/Source/Core/Core/PowerPC/JitInterface.cpp
+index d098c19..357ad95 100644
+--- a/Source/Core/Core/PowerPC/JitInterface.cpp
++++ b/Source/Core/Core/PowerPC/JitInterface.cpp
+@@ -327,6 +327,10 @@ void JitInterface::CompileExceptionCheck(ExceptionType type)
+   // the fallback is what reads these sets when it compiles, and what retires
+   // the call site by recompiling with the check folded inline.
+   JitBase* const target = m_jit->GetExceptionCheckTarget();
++  // The static-recompilation core without a fallback JIT compiles nothing that could use
++  // these sets (and Dolphin's pc is stale while native code runs).
++  if (!target)
++    return;
+ 
+   std::unordered_set<u32>* exception_addresses = nullptr;
+ 
+diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
+index e3581cc..df78233 100644
+--- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
++++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.cpp
+@@ -182,6 +182,8 @@ void StaticRecompCore::Init()
+ 
+   LoadModule();
+   m_idle_pc = Config::Get(Config::MAIN_STATICRECOMP_IDLE_PC);
++  if (const char* charge = std::getenv("COLO_IDLE_CHARGE"))
++    m_idle_charge = static_cast<u32>(std::max(1, std::atoi(charge)));
+   m_lockstep_verifier = std::make_unique<StaticRecompLockstep::StaticRecompLockstepVerifier>(*this);
+   m_lockstep_verifier->Init();
+ 
+diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
+index d084fea..684f8f1 100644
+--- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
++++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore.h
+@@ -69,7 +69,8 @@ public:
+   // check uncompiled and the hook firing on every gather-pipe store forever.
+   JitBase* GetExceptionCheckTarget() override
+   {
+-    return m_fallback_jit ? m_fallback_jit.get() : this;
++    // Native module code never uses these sets, and Dolphin's pc is stale while it runs.
++    return m_fallback_jit && !m_in_native_burst ? m_fallback_jit.get() : nullptr;
+   }
+ 
+   void EraseSingleBlock(const JitBlock& block) override {}
+@@ -212,6 +213,12 @@ private:
+   bool m_collect_dispatch_samples = false;
+   bool m_has_rel_modules = false;
+   u32 m_idle_pc = 0;
++  bool m_in_native_burst = false;
++  // Last chunk found by the dispatcher's fast check (bounds from the module's chunk table).
++  int m_last_chunk = -1;
++  u32 m_last_chunk_start = 0;
++  u32 m_last_chunk_size = 0;
++  u32 m_idle_charge = 2000;  // cycles charged per idle-loop pass (COLO_IDLE_CHARGE)
+ };
+ 
+ extern StaticRecompCore* g_static_recomp_core;
 diff --git a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
-index d91ec2d..4e9c880 100644
+index d91ec2d..9647b4d 100644
 --- a/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
 +++ b/Source/Core/Core/PowerPC/StaticRecomp/StaticRecompCore_Run.cpp
-@@ -1,3 +1,5 @@
+@@ -1,8 +1,11 @@
 +#include "Core/HW/VideoInterface.h"
 +#include "Core/HW/ProcessorInterface.h"
  // RecompCore: StaticRecomp CPU core - Main execution loop.
  // SPDX-License-Identifier: GPL-2.0-or-later
  
-@@ -117,11 +119,44 @@ void StaticRecompCore::Run()
+ #include "Core/PowerPC/StaticRecomp/StaticRecompCore.h"
+ #include "Core/System.h"
++#include "VideoCommon/Fifo.h"
+ #include "Core/PowerPC/PowerPC.h"
+ #include "Core/PowerPC/Interpreter/Interpreter.h"
+ #include "Core/PowerPC/StaticRecomp/StaticRecompLockstep.h"
+@@ -70,6 +73,11 @@ void StaticRecompCore::Run()
+     if (!m_module_active || m_chunk_lookup_table.empty())
+       return false;
+ 
++    // Consecutive dispatches mostly stay inside one chunk: check the last one first,
++    // which avoids a read from the 24 MB per-instruction table (a cache miss each time).
++    if (m_last_chunk >= 0 && address - m_last_chunk_start < m_last_chunk_size)
++      return m_chunk_state[m_last_chunk] == CHUNK_VERIFIED;
++
+     int lookup_index = -1;
+     if (address >= 0x80000000u && address < 0x80000000u + m_lookup_ram_size)
+     {
+@@ -82,6 +90,12 @@ void StaticRecompCore::Run()
+     if (lookup_index < 0 || lookup_index >= static_cast<int>(m_chunk_lookup_table.size()))
+       return false;
+     const int chunk = m_chunk_lookup_table[lookup_index];
++    if (chunk >= 0 && static_cast<u32>(chunk) < m_module->num_chunk_ranges)
++    {
++      m_last_chunk = chunk;
++      m_last_chunk_start = m_module->chunk_ranges[chunk].start;
++      m_last_chunk_size = m_module->chunk_ranges[chunk].end - m_module->chunk_ranges[chunk].start;
++    }
+     return chunk >= 0 && m_chunk_state[chunk] == CHUNK_VERIFIED;
+   };
+ 
+@@ -117,11 +131,44 @@ void StaticRecompCore::Run()
      return;
    }
  
@@ -135,6 +644,49 @@ index d91ec2d..4e9c880 100644
  
      do
      {
+@@ -132,6 +179,7 @@ void StaticRecompCore::Run()
+       {
+         SyncIn();
+         ++m_bursts;
++        m_in_native_burst = true;
+         do
+         {
+           if (dispatch_trace && (m_native_dispatches & 0xFFFFFu) == 0)
+@@ -181,10 +229,24 @@ void StaticRecompCore::Run()
+           m_guest.timebase += total_cycles / SystemTimers::TIMER_RATIO;
+           m_timebase_cycle_remainder = total_cycles % SystemTimers::TIMER_RATIO;
+ 
+-          // Idle loop skipping for configured target loops (e.g. Wii Menu OSIdleThread)
++          // Idle loop skipping for configured target loops (e.g. Wii Menu OSIdleThread).
++          // Colosseum Native: instead of CoreTiming::Idle() (jump straight to the next
++          // event, which stalled Colosseum's GX draw-done wait), each pass through the idle
++          // loop is charged a large block of cycles. Emulated time still advances in small
++          // steps, so events and interrupts arrive on schedule, but the host runs ~1/N of the
++          // spinning.
+           if (m_guest.pc == m_idle_pc && m_idle_pc != 0)
+           {
+-            m_system.GetCoreTiming().Idle();
++            // The game may be idle only because it waits for the GPU thread (dual core):
++            // let the GPU catch up first, as CoreTiming::Idle does, so skipped time is
++            // really idle time.
++            if (m_system.IsDualCoreMode())
++              m_system.GetFifo().FlushGpu();
++            ppc.downcount -= static_cast<int>(m_idle_charge);
++            m_charged_cycles += m_idle_charge;
++            const u64 total = m_timebase_cycle_remainder + m_idle_charge;
++            m_guest.timebase += total / SystemTimers::TIMER_RATIO;
++            m_timebase_cycle_remainder = total % SystemTimers::TIMER_RATIO;
+           }
+ 
+           // ctx->timebase is refreshed at burst start (SyncIn), and here we
+@@ -206,6 +268,7 @@ void StaticRecompCore::Run()
+         } while (m_module_active && fast_dispatchable_at(m_guest.pc) &&
+                  !(m_guest.host_call && IsHostCallAddress(m_guest.pc)) && ppc.downcount > 0 &&
+                  *state_ptr == CPU::State::Running);
++        m_in_native_burst = false;
+         SyncOut();
+         if ((ppc.Exceptions & SYNC_EXCEPTION_MASK) != 0)
+           power_pc.CheckExceptions();
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 index 3402fda..71f1fca 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
@@ -1732,7 +2284,7 @@ index fc6f896..2033825 100644
    }
  
 diff --git a/Source/Core/VideoCommon/Present.cpp b/Source/Core/VideoCommon/Present.cpp
-index 7c62730..e6e1189 100644
+index 7c62730..14f5545 100644
 --- a/Source/Core/VideoCommon/Present.cpp
 +++ b/Source/Core/VideoCommon/Present.cpp
 @@ -17,6 +17,7 @@
@@ -1743,7 +2295,7 @@ index 7c62730..e6e1189 100644
  #include "VideoCommon/OnScreenUI.h"
  #include "VideoCommon/PostProcessing.h"
  #include "VideoCommon/VertexManagerBase.h"
-@@ -208,6 +209,67 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+@@ -208,6 +209,71 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
  
    auto& video_events = GetVideoEvents();
  
@@ -1775,7 +2327,11 @@ index 7c62730..e6e1189 100644
 +      if (static const char* dump = std::getenv("COLO_INTERP_DUMP"); dump)
 +      {
 +        static u32 n = 0;
-+        if (n++ % 30 == 0 && m_prev_real && !m_interp_queue.empty())
++        static const int every = [] {
++          const char* e = std::getenv("COLO_INTERP_DUMP_EVERY");
++          return e ? std::max(1, std::atoi(e)) : 30;
++        }();
++        if (n++ % every == 0 && m_prev_real && !m_interp_queue.empty())
 +        {
 +          m_prev_real->texture->Save(fmt::format("{}/f{:05}_prev.png", dump, n), 0);
 +          for (size_t q = 0; q < m_interp_queue.size(); ++q)
@@ -1811,7 +2367,7 @@ index 7c62730..e6e1189 100644
    video_events.before_present_event.Trigger(present_info);
  
    if (!is_duplicate || !g_ActiveConfig.bSkipPresentingDuplicateXFBs)
-@@ -219,6 +281,35 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
+@@ -219,6 +285,35 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
    }
  }
  

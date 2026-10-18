@@ -403,6 +403,8 @@ void WriteDefaultSettings()
     Config::SetBase(Config::GFX_SHOW_FPS, true);
     launcher->Set("AndroidDefaults", 3);
   }
+  // Idle-loop skip (see the Windows launcher): the game's idle thread at 0x800FEB9C.
+  Config::SetBase(Config::MAIN_STATICRECOMP_IDLE_PC, 0x800FEB9Cu);
   // The game renders 16:9 itself (patched into the recompiled code).
   Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
   const std::string aspect = GameOption("AspectRatio", "16:9");

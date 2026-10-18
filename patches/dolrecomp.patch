@@ -1,0 +1,58 @@
+diff --git a/src/backend/c_cfg.c b/src/backend/c_cfg.c
+index 3bd8850..9fa2fc3 100644
+--- a/src/backend/c_cfg.c
++++ b/src/backend/c_cfg.c
+@@ -303,6 +303,18 @@ bool c_function_cfg_build(CFunctionCFG* cfg, const PPCInst* insts, u32 count,
+         }
+     }
+ 
++    // Nothing reads ctx->pc between a pure ALU/CR instruction or a direct branch and
++    // the next instruction that stores its own pc: those never fault, call out or
++    // return without setting pc themselves. Dropping the store everywhere (not only
++    // in direct loops) removes one store per such instruction from the module.
++    for (u32 i = 0; i < count; ++i) {
++        if (insts[i].embedded_data)
++            continue;
++        if (instruction_is_pc_transparent(&insts[i]) ||
++            ((insts[i].op == PPC_OP_B || insts[i].op == PPC_OP_BC) && !insts[i].lk))
++            cfg->materialize_pc[i] = 0;
++    }
++
+     for (u32 last = 0; last < count; ++last) {
+         if (!c_function_cfg_can_loop_directly(cfg, insts, function_address,
+                                               last)) {
+diff --git a/src/backend/emitter.c b/src/backend/emitter.c
+index 45c3286..a027e0a 100644
+--- a/src/backend/emitter.c
++++ b/src/backend/emitter.c
+@@ -1611,9 +1611,14 @@ static void emit_instruction_with_range(FILE* out, const PPCInst* inst,
+     case PPC_OP_DCBF:
+     case PPC_OP_DCBI:
+     case PPC_OP_ICBI:
++        // Cache-control ops change no CPU state on the runtime's fast path (it only
++        // invalidates JIT/SMC state and leaves pc at cia + 4), so keep running here
++        // instead of a dispatcher round trip per 32-byte line of a DCFlushRange loop.
++        // Anything else (exception, interpreter fallback moving pc) goes back out.
+         fprintf(out, "    ppc_fallback_instruction(ctx, 0x%08Xu, 0x%08Xu);\n",
+                 inst->raw, inst->address);
+-        fprintf(out, "    return;\n");
++        fprintf(out, "    if (ctx->exception || ctx->pc != 0x%08Xu) return;\n",
++                inst->address + 4u);
+         break;
+ 
+     case PPC_OP_DCBTST:
+diff --git a/tests/test_c_cfg.c b/tests/test_c_cfg.c
+index 9999080..170c31f 100644
+--- a/tests/test_c_cfg.c
++++ b/tests/test_c_cfg.c
+@@ -55,7 +55,9 @@ static void test_timebase_loop(void) {
+     check(insts[0].op == PPC_OP_MFTB, "decode timebase read");
+     check(!c_function_cfg_can_loop_directly(&cfg, insts, BASE, 1),
+           "yield before repeating a timebase read");
+-    check(cfg.materialize_pc[0] && cfg.materialize_pc[1],
++    // The timebase read keeps its PC; the yielding back-edge sets ctx->pc to its target
++    // itself before returning, so it needs no store of its own.
++    check(cfg.materialize_pc[0] && !cfg.materialize_pc[1],
+           "materialize PC around timebase loop");
+     c_function_cfg_destroy(&cfg);
+ }
