@@ -1,0 +1,90 @@
+# Builds the Colosseum Native Android app shell: Dolphin's Android app (RecompCore fork,
+# pinned) with our patches, start screen, GPU driver downloader and in-game menu.
+#
+# Only our code and Dolphin's are built here. The recompiled game code is never in this
+# repository: it is added to the APK afterwards, privately, from the player's own disc
+# (scripts/android_finish_apk.py), which also signs the APK.
+#
+# The unsigned APK and a trimmed build log are pushed to the "android-build" branch.
+name: android
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'patches/**'
+      - 'runtime/**'
+      - 'app/launcher/dol_patches.h'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RECOMPCORE_COMMIT: 10f7ac4fe48f74485fbc161ebf4d67242e11e671
+
+jobs:
+  apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+
+      - name: Get RecompCore (Dolphin) at the pinned commit
+        run: |
+          git config --global url."https://github.com/libarchive/bzip2.git".insteadOf "https://gitlab.com/bzip2/bzip2.git"
+          git init -q dolphin
+          cd dolphin
+          git remote add origin https://github.com/ExpansionPak/RecompCore.git
+          git fetch -q --depth 1 origin "$RECOMPCORE_COMMIT"
+          git checkout -q FETCH_HEAD
+          git submodule init
+          # Not used on Android.
+          for s in Externals/Qt Externals/FFmpeg-bin DolRecomp Externals/wil; do
+            git config "submodule.$s.update" none || true
+          done
+          git submodule update --depth 1 --jobs 8 --recursive
+
+      - name: Apply our patches and files
+        run: |
+          cd dolphin
+          git apply ../patches/dolphin.patch
+          git apply ../patches/android.patch
+          mkdir -p Source/Android/jni/colosseum
+          cp ../android/jni/*.cpp ../android/jni/*.h ../runtime/game_menu.cpp ../runtime/game_menu.hpp \
+             ../app/launcher/dol_patches.h Source/Android/jni/colosseum/
+          cp -r ../android/app/src/. Source/Android/app/src/
+
+      - name: Build APK
+        working-directory: dolphin/Source/Android
+        run: |
+          set -o pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace assembleRelease 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Publish to the android-build branch
+        if: always()
+        run: |
+          mkdir -p out
+          apk=$(ls dolphin/Source/Android/app/build/outputs/apk/release/*.apk 2>/dev/null | head -1 || true)
+          [ -n "$apk" ] && cp "$apk" out/ColosseumNative-unsigned.apk
+          if [ -f build.log ]; then
+            { echo "== errors =="; grep -n -E -i "error:|error [A-Z]|What went wrong|FAILED|undefined (reference|symbol)|Exception|e: " build.log | head -300
+              echo; echo "== last 400 lines =="; tail -400 build.log; } > out/build-log.txt
+          fi
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "run=$GITHUB_RUN_ID"
+            echo "date=$(date -u +%FT%TZ)"
+            echo "apk=$([ -n "$apk" ] && echo yes || echo no)"
+          } > out/status.txt
+          cd out
+          git init -q
+          git checkout -q -b android-build
+          git add -A
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -q -m "Android build for $GITHUB_SHA"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" android-build

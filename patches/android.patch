@@ -1,0 +1,190 @@
+diff --git a/Source/Android/app/build.gradle.kts b/Source/Android/app/build.gradle.kts
+index 0a952a0..895093d 100644
+--- a/Source/Android/app/build.gradle.kts
++++ b/Source/Android/app/build.gradle.kts
+@@ -34,7 +34,7 @@ android {
+     }
+ 
+     defaultConfig {
+-        applicationId = "org.dolphinemu.dolphinemu"
++        applicationId = "com.colosseumnative.app"
+         minSdk = 24
+         targetSdk = 36
+ 
+@@ -67,7 +67,7 @@ android {
+                 signingConfig = signingConfigs.getByName("release")
+             }
+ 
+-            resValue("string", "app_name_suffixed", "Dolphin Emulator")
++            resValue("string", "app_name_suffixed", "Colosseum Native")
+             isMinifyEnabled = true
+             isShrinkResources = true
+             proguardFiles(
+@@ -103,7 +103,7 @@ android {
+                     "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
+                     // , "-DENABLE_GENERIC=ON"
+                 )
+-                abiFilters("arm64-v8a", "x86_64") //, "armeabi-v7a", "x86"
++                abiFilters("arm64-v8a")
+ 
+                 // Uncomment the line below if you don't want to build the C++ unit tests
+                 //targets("main", "hook_impl", "main_hook", "gsl_alloc_hook", "file_redirect_hook")
+diff --git a/Source/Android/app/src/main/AndroidManifest.xml b/Source/Android/app/src/main/AndroidManifest.xml
+index 3218ed3..6db8768 100644
+--- a/Source/Android/app/src/main/AndroidManifest.xml
++++ b/Source/Android/app/src/main/AndroidManifest.xml
+@@ -52,12 +52,11 @@
+             android:shell="true"
+             tools:targetApi="29" />
+ 
++        <!-- Colosseum Native: the start screen (disc setup, Play, Settings, GPU driver). -->
+         <activity
+-            android:name=".ui.main.MainActivity"
++            android:name=".colosseum.ColosseumActivity"
+             android:exported="true"
+-            android:theme="@style/Theme.Dolphin.Splash.Main">
+-
+-            <!-- This intentfilter marks this Activity as the one that gets launched from Home screen. -->
++            android:theme="@style/Theme.Dolphin.Main">
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+ 
+@@ -65,6 +64,11 @@
+             </intent-filter>
+         </activity>
+ 
++        <activity
++            android:name=".ui.main.MainActivity"
++            android:exported="false"
++            android:theme="@style/Theme.Dolphin.Splash.Main" />
++
+         <activity
+             android:name=".ui.main.TvMainActivity"
+             android:exported="true"
+diff --git a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
+index 1289d30..8fdb042 100644
+--- a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
++++ b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
+@@ -24,6 +24,7 @@ import androidx.fragment.app.DialogFragment
+ import androidx.fragment.app.Fragment
+ import androidx.fragment.app.FragmentActivity
+ import androidx.lifecycle.Lifecycle
++import androidx.lifecycle.lifecycleScope
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import com.google.android.material.dialog.MaterialAlertDialogBuilder
+ import com.google.android.material.snackbar.Snackbar
+@@ -203,16 +204,28 @@ class SettingsFragment : Fragment(), SettingsFragmentView {
+         }
+         val msg = "${presenter.gpuDriver!!.name} ${presenter.gpuDriver!!.driverVersion}"
+ 
++        // Colosseum Native: download drivers too.
++        val options = arrayOf(
++            "Download a driver…",
++            getString(R.string.gpu_driver_dialog_install),
++            getString(R.string.gpu_driver_dialog_system),
++        )
+         MaterialAlertDialogBuilder(requireContext())
+-            .setTitle(getString(R.string.gpu_driver_dialog_title))
+-            .setMessage(msg)
+-            .setNegativeButton(android.R.string.cancel, null)
+-            .setNeutralButton(R.string.gpu_driver_dialog_system) { _: DialogInterface?, _: Int ->
+-                presenter.useSystemDriver()
+-            }
+-            .setPositiveButton(R.string.gpu_driver_dialog_install) { _: DialogInterface?, _: Int ->
+-                askForDriverFile()
++            .setTitle("${getString(R.string.gpu_driver_dialog_title)}: $msg")
++            .setItems(options) { _: DialogInterface?, which: Int ->
++                when (which) {
++                    0 -> org.dolphinemu.dolphinemu.colosseum.DriverDownloader.showDownloadDialog(
++                        requireActivity(), viewLifecycleOwner.lifecycleScope
++                    ) {
++                        presenter.gpuDriver =
++                            org.dolphinemu.dolphinemu.utils.GpuDriverHelper.getInstalledDriverMetadata()
++                                ?: presenter.gpuDriver
++                    }
++                    1 -> askForDriverFile()
++                    2 -> presenter.useSystemDriver()
++                }
+             }
++            .setNegativeButton(android.R.string.cancel, null)
+             .show()
+     }
+ 
+diff --git a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt
+index e4698ba..eebb5a5 100644
+--- a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt
++++ b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/EmulationFragment.kt
+@@ -70,6 +70,9 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
+ 
+         inputOverlay = binding.surfaceInputOverlay
+ 
++        // Colosseum Native: Menu button and touch input for the in-game menu.
++        org.dolphinemu.dolphinemu.colosseum.MenuTouchLayer.attach(binding.root)
++
+         val doneButton = binding.doneControlConfig
+         doneButton?.setOnClickListener { stopConfiguringControls() }
+ 
+diff --git a/Source/Android/jni/CMakeLists.txt b/Source/Android/jni/CMakeLists.txt
+index a15eb5c..c07c915 100644
+--- a/Source/Android/jni/CMakeLists.txt
++++ b/Source/Android/jni/CMakeLists.txt
+@@ -34,6 +34,9 @@ add_library(main SHARED
+   RiivolutionPatches.cpp
+   SkylanderConfig.cpp
+   WiiUtils.cpp
++  # Colosseum Native: launcher glue and the in-game menu.
++  colosseum/ColosseumNative.cpp
++  colosseum/game_menu.cpp
+ )
+ 
+ target_link_libraries(main
+@@ -43,6 +46,9 @@ PRIVATE
+   core
+   inputcommon
+   uicommon
++  videocommon
++  imgui
++  fmt::fmt
+ )
+ 
+ target_link_libraries(main
+@@ -56,6 +62,7 @@ PRIVATE
+ 
+ target_include_directories(main
+ PRIVATE
++    ${CMAKE_CURRENT_SOURCE_DIR}/colosseum
+     ${CMAKE_SOURCE_DIR}/Externals/libadrenotools/include
+     ${CMAKE_SOURCE_DIR}/Externals/VulkanMemoryAllocator/include
+ )
+diff --git a/Source/Android/jni/MainAndroid.cpp b/Source/Android/jni/MainAndroid.cpp
+index a5048e0..fb08a8d 100644
+--- a/Source/Android/jni/MainAndroid.cpp
++++ b/Source/Android/jni/MainAndroid.cpp
+@@ -65,6 +65,7 @@
+ 
+ #include "jni/AndroidCommon/AndroidCommon.h"
+ #include "jni/AndroidCommon/IDCache.h"
++#include "jni/colosseum/ColosseumNative.h"
+ 
+ namespace
+ {
+@@ -109,7 +110,8 @@ void Host_PPCBreakpointsChanged()
+ 
+ bool Host_UIBlocksControllerState()
+ {
+-  return false;
++  // Colosseum Native: the game ignores the controller while the in-game menu is open.
++  return ColosseumNative::MenuIsOpen();
+ }
+ 
+ void Host_Message(HostMessageID id)
+@@ -566,6 +568,9 @@ static void Run(JNIEnv* env, std::unique_ptr<BootParameters>&& boot, bool riivol
+   WindowSystemInfo wsi(WindowSystemType::Android, nullptr, s_surf, s_surf);
+   wsi.render_surface_scale = GetRenderSurfaceScale(env);
+ 
++  // Colosseum Native: recompiled game code and the in-game menu.
++  ColosseumNative::BeforeBoot();
++
+   if (BootManager::BootCore(Core::System::GetInstance(), std::move(boot), wsi))
+   {
+     static constexpr int WAIT_STEP = 25;

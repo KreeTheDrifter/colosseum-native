@@ -100,6 +100,16 @@ constexpr std::array<AaChoice, 7> kAa{{
 // ---------------------------------------------------------------------------------------
 std::mutex s_mutex;
 std::deque<Key> s_keys;
+std::deque<std::pair<float, float>> s_taps;  // normalized surface coordinates
+// Row geometry from the last Draw, in display pixels, for taps.
+struct RowRect
+{
+  int index;
+  float y0, y1;
+};
+std::vector<RowRect> s_rows;
+float s_menu_x0 = 0, s_menu_x1 = 0, s_menu_y0 = 0, s_menu_y1 = 0, s_value_x0 = 0;
+bool s_scroll_to_selected = false;
 std::atomic<bool> s_open{false};
 HostHooks s_hooks;
 int s_selected = 0;
@@ -213,7 +223,8 @@ void PokeGameSettings()
   auto& system = Core::System::GetInstance();
   if (Core::GetState(system) == Core::State::Uninitialized)
     return;
-  const Core::CPUThreadGuard guard(system);
+  // A plain write: the game only reads these bytes, and pausing the CPU from here could
+  // deadlock when the menu draws on the video thread (dual core, Android).
   u8* p = system.GetMemory().GetPointerForRange(kSettingsAddr, 8);
   if (!p)
     return;
@@ -507,6 +518,9 @@ std::vector<Item> BuildItems()
                      s_open = false;
                    }});
   items.push_back({"Resume", "", false, true, [](int) { s_open = false; }});
+  if (s_hooks.gpu_driver_name)
+    items.push_back({"GPU driver", s_hooks.gpu_driver_name(), false, true,
+                     [](int) { if (s_hooks.change_gpu_driver) s_hooks.change_gpu_driver(); }});
   if (s_hooks.quit)
     items.push_back({"Quit game", "", false, true, [](int) { s_hooks.quit(); }});
   return items;
@@ -586,11 +600,39 @@ std::array<PadButton, 7> s_pad{{
 bool s_stick_down[4] = {};
 std::chrono::steady_clock::time_point s_stick_next[4];
 
-void PollPad(std::vector<Key>& out)
+// A controller to navigate the menu with: an XInput pad on Windows, otherwise the first
+// SDL or Android device that has gamepad buttons.
+std::shared_ptr<ciface::Core::Device> FindMenuPad()
 {
   ciface::Core::DeviceQualifier q;
   q.FromString("XInput/0/Gamepad");
-  const auto device = g_controller_interface.FindDevice(q);
+  if (auto device = g_controller_interface.FindDevice(q))
+    return device;
+  for (const std::string& name : g_controller_interface.GetAllDeviceStrings())
+  {
+    if (name.rfind("SDL/", 0) != 0 && name.rfind("Android/", 0) != 0)
+      continue;
+    q.FromString(name);
+    auto device = g_controller_interface.FindDevice(q);
+    if (device && (device->FindInput("Button A") || device->FindInput("Gamepad Button A")))
+      return device;
+  }
+  return nullptr;
+}
+
+// The first input the device has out of several names (the names differ by backend).
+const ciface::Core::Device::Input* FindAnyInput(const ciface::Core::Device& device,
+                                                std::initializer_list<const char*> names)
+{
+  for (const char* name : names)
+    if (const auto* input = device.FindInput(name))
+      return input;
+  return nullptr;
+}
+
+void PollPad(std::vector<Key>& out)
+{
+  const auto device = FindMenuPad();
   if (!device)
     return;
   const auto now = std::chrono::steady_clock::now();
@@ -611,17 +653,66 @@ void PollPad(std::vector<Key>& out)
     down = pressed;
   };
 
-  for (auto& b : s_pad)
+  // XInput / SDL names first, then Android's (source-prefixed) ones.
+  static const std::array<std::initializer_list<const char*>, 7> names{{
+      {"Pad N", "Dpad Up", "Gamepad Dpad Up", "Up"},
+      {"Pad S", "Dpad Down", "Gamepad Dpad Down", "Down"},
+      {"Pad W", "Dpad Left", "Gamepad Dpad Left", "Left"},
+      {"Pad E", "Dpad Right", "Gamepad Dpad Right", "Right"},
+      {"Button A", "Gamepad Button A"},
+      {"Button B", "Gamepad Button B"},
+      {"Back", "Select", "Gamepad Select", "Keyboard Select"},
+  }};
+  for (size_t i = 0; i < s_pad.size(); ++i)
   {
-    const auto* input = device->FindInput(b.input);
+    auto& b = s_pad[i];
+    const auto* input = FindAnyInput(*device, names[i]);
     edge(input && input->GetState() > 0.5, b.down, b.next, b.repeat, b.key);
   }
-  static constexpr const char* sticks[4] = {"Left Y+", "Left Y-", "Left X-", "Left X+"};
+  static const std::array<std::initializer_list<const char*>, 4> sticks{{
+      {"Left Y+", "Axis Y-", "Axis 1-"},
+      {"Left Y-", "Axis Y+", "Axis 1+"},
+      {"Left X-", "Axis X-", "Axis 0-"},
+      {"Left X+", "Axis X+", "Axis 0+"},
+  }};
   static constexpr Key stick_keys[4] = {Key::Up, Key::Down, Key::Left, Key::Right};
   for (int i = 0; i < 4; ++i)
   {
-    const auto* input = device->FindInput(sticks[i]);
+    const auto* input = FindAnyInput(*device, sticks[i]);
     edge(input && input->GetState() > 0.6, s_stick_down[i], s_stick_next[i], true, stick_keys[i]);
+  }
+}
+
+// A tap in display pixels: pick the row; tapping the selected row runs its action or,
+// for a setting, steps it (left half of the value column: back, right half: forward).
+// Outside the menu closes it.
+void HandleTap(float x, float y, std::vector<Item>& items)
+{
+  if (x < s_menu_x0 || x > s_menu_x1 || y < s_menu_y0 || y > s_menu_y1)
+  {
+    Close();
+    return;
+  }
+  for (const RowRect& row : s_rows)
+  {
+    if (y < row.y0 || y >= row.y1 || row.index >= static_cast<int>(items.size()))
+      continue;
+    Item& item = items[row.index];
+    if (item.header)
+      return;
+    if (row.index != s_selected && (item.action || x < s_value_x0))
+    {
+      s_selected = row.index;
+      return;
+    }
+    s_selected = row.index;
+    if (!item.change)
+      return;
+    if (item.action)
+      item.change(1);
+    else
+      item.change(x < (s_value_x0 + s_menu_x1) * 0.5f ? -1 : 1);
+    return;
   }
 }
 }  // namespace
@@ -633,6 +724,20 @@ bool OnKey(Key key)
   std::lock_guard lock(s_mutex);
   s_keys.push_back(key);
   return true;
+}
+
+bool OnTap(float x, float y)
+{
+  if (!s_open)
+    return false;
+  std::lock_guard lock(s_mutex);
+  s_taps.emplace_back(x, y);
+  return true;
+}
+
+void Open()
+{
+  OnKey(s_open ? Key::Back : Key::Toggle);
 }
 
 bool IsOpen()
@@ -658,18 +763,26 @@ void Draw()
       Config::SetBase(Config::GFX_DUMP_BASE_TEXTURES, true);
       Config::SetBase(Config::GFX_DUMP_MIP_TEXTURES, false);
     }
+#ifdef ANDROID
+    OSD::AddMessage("Colosseum settings: tap Menu at the top (controller: Select)", 8000);
+#else
     OSD::AddMessage("Settings: Esc or F1 (controller: View button)", 8000);
+#endif
   }
 
   KeepGameSettings();
 
   std::vector<Key> keys;
+  std::vector<std::pair<float, float>> taps;
   {
     std::lock_guard lock(s_mutex);
     keys.assign(s_keys.begin(), s_keys.end());
     s_keys.clear();
+    taps.assign(s_taps.begin(), s_taps.end());
+    s_taps.clear();
   }
   PollPad(keys);
+  const int selected_before = s_selected;
 
   for (Key key : keys)
   {
@@ -685,12 +798,26 @@ void Draw()
     std::vector<Item> items = BuildItems();
     HandleKey(key, items);
   }
+  const ImGuiIO& io = ImGui::GetIO();
+  for (const auto& [tx, ty] : taps)
+  {
+    if (!s_open)
+      break;
+    std::vector<Item> items = BuildItems();
+    HandleTap(tx * io.DisplaySize.x, ty * io.DisplaySize.y, items);
+  }
+  if (s_selected != selected_before)
+    s_scroll_to_selected = true;
   if (!s_open)
     return;
 
   const std::vector<Item> items = BuildItems();
-  const ImGuiIO& io = ImGui::GetIO();
+#ifdef ANDROID
+  // Bigger rows for fingers.
+  const float scale = std::max(1.0f, io.DisplaySize.y / 420.0f);
+#else
   const float scale = std::max(1.0f, io.DisplaySize.y / 600.0f);
+#endif
 
   ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
                           ImGuiCond_Always, ImVec2(0.5f, 0.5f));
@@ -704,13 +831,33 @@ void Draw()
                        ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing))
   {
     ImGui::SetWindowFontScale(scale);
+    // The list scrolls when it is taller than the screen (phones): it follows the selection.
+    const float row_h = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetStyle().CellPadding.y * 2;
+    const float list_h = std::min(row_h * static_cast<float>(items.size()) + 4.0f * scale,
+                                  io.DisplaySize.y * 0.78f);
+    ImGui::BeginChild("list", ImVec2(0.0f, list_h), ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoNav);
+    s_rows.clear();
+    const ImVec2 clip_min = ImGui::GetWindowPos();
+    const float clip_y1 = clip_min.y + ImGui::GetWindowHeight();
     if (ImGui::BeginTable("settings", 2, ImGuiTableFlags_SizingStretchProp))
     {
       for (size_t i = 0; i < items.size(); ++i)
       {
         const Item& item = items[i];
-        ImGui::TableNextRow();
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, row_h);
         ImGui::TableSetColumnIndex(0);
+        {
+          const float y0 = ImGui::GetCursorScreenPos().y;
+          if (y0 + row_h > clip_min.y && y0 < clip_y1)
+            s_rows.push_back({static_cast<int>(i), std::max(y0, clip_min.y),
+                              std::min(y0 + row_h, clip_y1)});
+          if (static_cast<int>(i) == s_selected && s_scroll_to_selected)
+          {
+            ImGui::SetScrollHereY(0.5f);
+            s_scroll_to_selected = false;
+          }
+        }
         if (item.header)
         {
           ImGui::Spacing();
@@ -723,15 +870,27 @@ void Draw()
                                  ImGui::GetColorU32(ImVec4(0.25f, 0.45f, 0.85f, 0.55f)));
         ImGui::TextUnformatted(item.label.c_str());
         ImGui::TableSetColumnIndex(1);
+        s_value_x0 = ImGui::GetCursorScreenPos().x;
         if (!item.value.empty())
           ImGui::Text(selected ? "<  %s  >" : "   %s", item.value.c_str());
       }
       ImGui::EndTable();
     }
+    ImGui::EndChild();
     ImGui::Separator();
     if (!s_status.empty() && std::chrono::steady_clock::now() < s_status_until)
       ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "%s", s_status.c_str());
+#ifdef ANDROID
+    ImGui::TextDisabled("Tap a row, then tap its value's left/right side to change it. Tap outside to close.");
+#else
     ImGui::TextDisabled("Up/Down select   Left/Right change   Enter/A choose   Esc/B close");
+#endif
+    const ImVec2 pos = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    s_menu_x0 = pos.x;
+    s_menu_y0 = pos.y;
+    s_menu_x1 = pos.x + size.x;
+    s_menu_y1 = pos.y + size.y;
   }
   ImGui::End();
   ImGui::PopStyleVar(2);
