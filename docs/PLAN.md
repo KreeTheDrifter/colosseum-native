@@ -151,3 +151,20 @@ Measured on the Linux build, Null renderer, uncapped, from a gameplay save state
 The app ships no game data. On first launch the player picks their Colosseum
 disc image (ISO or CISO); the app checks `GC6E01` and the main.dol hash and reads
 everything else from it. DolRecomp is GPL-3.0, so this project is GPL-3.0 as well.
+
+## Android
+
+The app is Dolphin's own Android app from the pinned RecompCore commit, patched
+(`patches/android.patch`) and extended (`android/`): `ColosseumActivity` is the launcher
+(disc setup through the system file picker, Play, Settings, Controls, GPU driver),
+`DriverDownloader` lists adrenotools driver zips from GitHub releases
+(K11MCH1/AdrenoToolsDrivers, Weab-chan/freedreno_turnip-CI) and installs them with
+Dolphin's `GpuDriverHelper`, `MenuTouchLayer` adds the Menu button and taps for the
+ImGui menu, and `android/jni/ColosseumNative.cpp` unpacks the disc, patches main.dol and
+boots on the StaticRecomp core. `.github/workflows/android.yml` builds the APK (our code
+and Dolphin's only) and pushes it to the `android-build` branch.
+
+The arm64 game module is built privately without the NDK: clang `--target=aarch64-linux-
+android29` with minimal libc headers and stub libc/libm for DT_NEEDED (the module only
+imports a few math functions). `scripts/android_finish_apk.py` adds it to the APK as
+`lib/arm64-v8a/libgGC6E01_recomp.so` and signs with APK Signature Scheme v2.
