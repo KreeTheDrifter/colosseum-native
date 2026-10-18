@@ -30,7 +30,6 @@ import org.dolphinemu.dolphinemu.features.settings.ui.MenuTag
 import org.dolphinemu.dolphinemu.features.settings.ui.SettingsActivity
 import org.dolphinemu.dolphinemu.utils.AfterDirectoryInitializationRunner
 import org.dolphinemu.dolphinemu.utils.DirectoryInitialization
-import org.dolphinemu.dolphinemu.utils.GpuDriverInstallResult
 import java.io.File
 
 class ColosseumActivity : AppCompatActivity() {
@@ -45,10 +44,6 @@ class ColosseumActivity : AppCompatActivity() {
 
     private val pickDisc = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) unpack(uri)
-    }
-
-    private val pickDriverZip = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) installDriverFile(uri)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,7 +88,7 @@ class ColosseumActivity : AppCompatActivity() {
         column.addView(play)
         column.addView(button("Settings") { SettingsActivity.launch(this, MenuTag.SETTINGS) })
         column.addView(button("Controls") { SettingsActivity.launch(this, MenuTag.GCPAD_TYPE) })
-        driverButton = button("GPU driver") { showDriverDialog() }
+        driverButton = button("GPU driver") { GpuDriverActivity.launch(this) }
         column.addView(driverButton)
         column.addView(button("Choose disc image…") { pickDisc.launch(arrayOf("*/*")) })
 
@@ -116,7 +111,7 @@ class ColosseumActivity : AppCompatActivity() {
         if (ready) refresh()
         if (ColosseumNative.changeDriverRequested) {
             ColosseumNative.changeDriverRequested = false
-            if (ready) showDriverDialog()
+            GpuDriverActivity.launch(this)
         }
     }
 
@@ -185,50 +180,6 @@ class ColosseumActivity : AppCompatActivity() {
             return
         }
         EmulationActivity.launch(this, File(gameDir, "sys/main.dol").absolutePath, false)
-    }
-
-    private fun showDriverDialog() {
-        val current = DriverDownloader.currentDriverName(this)
-        val options = arrayOf(
-            "Download a driver…",
-            "Install a driver from a file…",
-            "Use the phone's own driver",
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("GPU driver: $current")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> DriverDownloader.showDownloadDialog(this, lifecycleScope) { refresh() }
-                    1 -> pickDriverZip.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                    2 -> {
-                        DriverDownloader.useSystemDriver()
-                        refresh()
-                    }
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
-
-    private fun installDriverFile(uri: Uri) {
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val zip = File(cacheDir, "gpu_driver_file.zip")
-                try {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        zip.outputStream().use { input.copyTo(it) }
-                    } ?: return@withContext GpuDriverInstallResult.FileNotFound
-                    DriverDownloader.install(zip)
-                } finally {
-                    zip.delete()
-                }
-            }
-            showMessage(
-                if (result == GpuDriverInstallResult.Success) "Driver installed: ${DriverDownloader.currentDriverName(this@ColosseumActivity)}"
-                else "That file isn't a driver package for this app ($result)."
-            )
-            refresh()
-        }
     }
 
     private fun showMessage(text: String) {

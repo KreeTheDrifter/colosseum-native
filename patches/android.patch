@@ -41,7 +41,7 @@ index ef5e934..4399d72 100644
 +# Colosseum Native: called from native code (in-game menu).
 +-keep class org.dolphinemu.dolphinemu.colosseum.** { *; }
 diff --git a/Source/Android/app/src/main/AndroidManifest.xml b/Source/Android/app/src/main/AndroidManifest.xml
-index 3218ed3..6db8768 100644
+index 3218ed3..2121c1d 100644
 --- a/Source/Android/app/src/main/AndroidManifest.xml
 +++ b/Source/Android/app/src/main/AndroidManifest.xml
 @@ -52,12 +52,11 @@
@@ -60,10 +60,16 @@ index 3218ed3..6db8768 100644
              <intent-filter>
                  <action android:name="android.intent.action.MAIN" />
  
-@@ -65,6 +64,11 @@
+@@ -65,6 +64,17 @@
              </intent-filter>
          </activity>
  
++        <activity
++            android:name=".colosseum.GpuDriverActivity"
++            android:exported="false"
++            android:label="GPU driver"
++            android:theme="@style/Theme.Dolphin.Main" />
++
 +        <activity
 +            android:name=".ui.main.MainActivity"
 +            android:exported="false"
@@ -73,7 +79,7 @@ index 3218ed3..6db8768 100644
              android:name=".ui.main.TvMainActivity"
              android:exported="true"
 diff --git a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
-index 1289d30..8fdb042 100644
+index 1289d30..8da6cbd 100644
 --- a/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
 +++ b/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsFragment.kt
 @@ -24,6 +24,7 @@ import androidx.fragment.app.DialogFragment
@@ -84,7 +90,7 @@ index 1289d30..8fdb042 100644
  import androidx.recyclerview.widget.LinearLayoutManager
  import com.google.android.material.dialog.MaterialAlertDialogBuilder
  import com.google.android.material.snackbar.Snackbar
-@@ -203,16 +204,28 @@ class SettingsFragment : Fragment(), SettingsFragmentView {
+@@ -203,16 +204,22 @@ class SettingsFragment : Fragment(), SettingsFragmentView {
          }
          val msg = "${presenter.gpuDriver!!.name} ${presenter.gpuDriver!!.driverVersion}"
  
@@ -106,13 +112,7 @@ index 1289d30..8fdb042 100644
 +            .setTitle("${getString(R.string.gpu_driver_dialog_title)}: $msg")
 +            .setItems(options) { _: DialogInterface?, which: Int ->
 +                when (which) {
-+                    0 -> org.dolphinemu.dolphinemu.colosseum.DriverDownloader.showDownloadDialog(
-+                        requireActivity(), viewLifecycleOwner.lifecycleScope
-+                    ) {
-+                        presenter.gpuDriver =
-+                            org.dolphinemu.dolphinemu.utils.GpuDriverHelper.getInstalledDriverMetadata()
-+                                ?: presenter.gpuDriver
-+                    }
++                    0 -> org.dolphinemu.dolphinemu.colosseum.GpuDriverActivity.launch(requireContext())
 +                    1 -> askForDriverFile()
 +                    2 -> presenter.useSystemDriver()
 +                }

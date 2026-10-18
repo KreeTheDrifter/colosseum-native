@@ -37,6 +37,18 @@ object ColosseumNative {
     @JvmStatic
     external fun menuIsOpen(): Boolean
 
+    /** The in-game settings as rows: "<h|a|s>\u001f<label>\u001f<value>" (header, action, setting). */
+    @JvmStatic
+    external fun menuItems(): Array<String>
+
+    /** Steps setting [index] by [dir] (-1/+1) or runs an action (+1). Returns a status message or "". */
+    @JvmStatic
+    external fun menuChange(index: Int, dir: Int): String
+
+    /** The settings panel is showing: the game ignores the controller meanwhile. */
+    @JvmStatic
+    external fun menuSetPanelOpen(open: Boolean)
+
     /** Set when the in-game menu's "GPU driver" was chosen: the start screen opens the driver dialog. */
     @Volatile
     @JvmStatic

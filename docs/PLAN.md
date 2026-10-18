@@ -168,3 +168,13 @@ The arm64 game module is built privately without the NDK: clang `--target=aarch6
 android29` with minimal libc headers and stub libc/libm for DT_NEEDED (the module only
 imports a few math functions). `scripts/android_finish_apk.py` adds it to the APK as
 `lib/arm64-v8a/libgGC6E01_recomp.so` and signs with APK Signature Scheme v2.
+
+Idle-loop skip (StaticRecompIdlePC = 0x800FEB9C) re-tested 2026-10-18 through the mayor scene:
+the game slows to ~0.5 fps (frames wait out the GX draw-done timeout), the same symptom as
+a player's frozen save from build 8. It stays off until the skip is reworked.
+
+Android test 4: phone defaults 2x / no MSAA / 4x AF / vertex lighting / specialized shaders
+(cached), FPS counter on; no 120 fps option on phones; a native touch settings panel (the
+Menu button) fed by the shared menu rows; a GPU driver screen with a recommendation from the
+GPU model (GL_RENDERER): Adreno 6xx and 730-799 newest regular Turnip, 710-729 Turnip Gmem,
+8xx newest Qualcomm build.

@@ -6,7 +6,9 @@
 package org.dolphinemu.dolphinemu.colosseum
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -56,7 +58,13 @@ class MenuTouchLayer(context: Context) : View(context) {
                 minHeight = 0
                 minimumHeight = 0
                 setPadding((14 * density).toInt(), 0, (14 * density).toInt(), 0)
-                setOnClickListener { ColosseumNative.menuToggle() }
+                setOnClickListener {
+                    // Touch: the native settings panel. (A controller's Select opens the
+                    // on-screen menu, which also takes taps through this layer.)
+                    var c: Context = context
+                    while (c !is Activity && c is ContextWrapper) c = c.baseContext
+                    if (c is Activity) GameMenuPanel.toggle(c) else ColosseumNative.menuToggle()
+                }
             }
             root.addView(
                 button,

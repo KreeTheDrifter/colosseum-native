@@ -111,6 +111,7 @@ std::vector<RowRect> s_rows;
 float s_menu_x0 = 0, s_menu_x1 = 0, s_menu_y0 = 0, s_menu_y1 = 0, s_value_x0 = 0;
 bool s_scroll_to_selected = false;
 std::atomic<bool> s_open{false};
+std::atomic<bool> s_external_open{false};  // the Android settings panel
 HostHooks s_hooks;
 int s_selected = 0;
 int s_state_slot = 1;
@@ -164,6 +165,12 @@ void WriteGameOption(const std::string& key, const std::string& value)
 // 0: 30 fps (original), 1: 60 fps, 2: 120 fps (60 + an interpolated frame between each pair).
 int s_fps_mode = 1;
 constexpr const char* kFpsValues[] = {"30", "60", "120"};
+#ifdef ANDROID
+// Phones: no 120 (the in-between frames double the GPU work and stuttered on an S24 Ultra).
+constexpr int kFpsModes = 2;
+#else
+constexpr int kFpsModes = 3;
+#endif
 constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps", "120 fps (interpolated)"};
 
 void ApplyInterpolation()
@@ -179,6 +186,8 @@ void LoadGameOptions()
 {
   const std::string fps = ReadGameOption("FrameRate", "60");
   s_fps_mode = fps == "30" ? 0 : fps == "120" ? 2 : 1;
+  if (s_fps_mode >= kFpsModes)
+    s_fps_mode = 1;
   ApplyInterpolation();
   const std::string aspect = ReadGameOption("AspectRatio", "16:9");
   for (size_t i = 0; i < kAspects.size(); ++i)
@@ -470,7 +479,7 @@ std::vector<Item> BuildItems()
 
   header("Game");
   items.push_back({"Frame rate", kFpsLabels[s_fps_mode], false, false, [](int dir) {
-                     s_fps_mode = (s_fps_mode + (dir < 0 ? 2 : 1)) % 3;
+                     s_fps_mode = (s_fps_mode + (dir < 0 ? kFpsModes - 1 : 1)) % kFpsModes;
                      WriteGameOption("FrameRate", kFpsValues[s_fps_mode]);
                      PokeGameSettings();
                      ApplyInterpolation();
@@ -742,7 +751,39 @@ void Open()
 
 bool IsOpen()
 {
-  return s_open;
+  return s_open || s_external_open;
+}
+
+void SetExternalOpen(bool open)
+{
+  s_external_open = open;
+  if (open)
+    LoadGameOptions();
+  else if (s_dirty)
+  {
+    Config::Save();
+    s_dirty = false;
+  }
+}
+
+std::vector<ExportedItem> ExportItems()
+{
+  std::lock_guard lock(s_mutex);
+  std::vector<ExportedItem> out;
+  for (const Item& item : BuildItems())
+    out.push_back({item.label, item.value, item.header, item.action});
+  return out;
+}
+
+std::string Change(int index, int dir)
+{
+  std::lock_guard lock(s_mutex);
+  std::vector<Item> items = BuildItems();
+  if (index < 0 || index >= static_cast<int>(items.size()) || !items[index].change)
+    return {};
+  s_status.clear();
+  items[index].change(dir);
+  return s_status;
 }
 
 void SetHostHooks(HostHooks hooks)

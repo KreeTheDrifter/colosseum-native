@@ -386,6 +386,23 @@ void WriteDefaultSettings()
     Config::SetBase(Config::MAIN_USE_PANIC_HANDLERS, false);
     launcher->Set("AndroidDefaults", 2);
   }
+  if (defaults < 3)
+  {
+    // Smoother phone defaults (test 3 was choppy on an S24 Ultra at 3x / 2x MSAA with hybrid
+    // ubershaders): 2x internal resolution (1280x1056, sharper than the phone needs at
+    // 16:9), no MSAA, 4x anisotropic, vertex lighting, and specialized shaders built once
+    // and cached (a short hitch the first time an effect appears, then none). The FPS
+    // counter is on so the frame rate can be reported; the menu turns it off.
+    Config::SetBase(Config::GFX_EFB_SCALE, 2);
+    Config::SetBase(Config::GFX_MSAA, 1u);
+    Config::SetBase(Config::GFX_SSAA, false);
+    Config::SetBase(Config::GFX_ENHANCE_MAX_ANISOTROPY, AnisotropicFilteringMode::Force4x);
+    Config::SetBase(Config::GFX_ENABLE_PIXEL_LIGHTING, false);
+    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE, ShaderCompilationMode::Synchronous);
+    Config::SetBase(Config::GFX_WAIT_FOR_SHADERS_BEFORE_STARTING, true);
+    Config::SetBase(Config::GFX_SHOW_FPS, true);
+    launcher->Set("AndroidDefaults", 3);
+  }
   // The game renders 16:9 itself (patched into the recompiled code).
   Config::SetBase(Config::GFX_WIDESCREEN_HACK, false);
   const std::string aspect = GameOption("AspectRatio", "16:9");
@@ -537,6 +554,31 @@ JNIEXPORT jboolean JNICALL Java_org_dolphinemu_dolphinemu_colosseum_ColosseumNat
     JNIEnv*, jclass)
 {
   return moderngekko::menu::IsOpen() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jobjectArray JNICALL Java_org_dolphinemu_dolphinemu_colosseum_ColosseumNative_menuItems(
+    JNIEnv* env, jclass)
+{
+  // One string per row: "<h|a|s>\x1f<label>\x1f<value>" (header, action, setting).
+  std::vector<std::string> rows;
+  for (const auto& item : moderngekko::menu::ExportItems())
+  {
+    const char kind = item.header ? 'h' : item.action ? 'a' : 's';
+    rows.push_back(std::string(1, kind) + '\x1f' + item.label + '\x1f' + item.value);
+  }
+  return SpanToJStringArray(env, rows);
+}
+
+JNIEXPORT jstring JNICALL Java_org_dolphinemu_dolphinemu_colosseum_ColosseumNative_menuChange(
+    JNIEnv* env, jclass, jint index, jint dir)
+{
+  return ToJString(env, moderngekko::menu::Change(index, dir));
+}
+
+JNIEXPORT void JNICALL Java_org_dolphinemu_dolphinemu_colosseum_ColosseumNative_menuSetPanelOpen(
+    JNIEnv*, jclass, jboolean open)
+{
+  moderngekko::menu::SetExternalOpen(open == JNI_TRUE);
 }
 
 }  // extern "C"
