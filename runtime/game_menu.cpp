@@ -48,6 +48,12 @@ namespace
 // Pokemon Colosseum (GC6E01) settings block, patched into main.dol by tools/disc.py:
 // +0 u8 frame-rate mask (0x00 = 60 fps, 0xFF = original 30/60), +4 f32 aspect multiplier.
 constexpr u32 kSettingsAddr = 0x80266370;
+// Story mode's field-control block (found by sampling RAM through Phenac's mayor scene,
+// free roam in several places, the title screen and a battle):
+//   +0x10 u32 300 and +0x18 f32 12.0 while a field map is active (zero in menus/battles),
+//   +0x1C u32 1 while the player can walk around, 0 while a script (forced dialogue,
+//   cutscene, NPC walks) has control.
+constexpr u32 kFieldBlockAddr = 0x80426BE0;
 
 struct AspectChoice
 {
@@ -148,15 +154,14 @@ void WriteGameOption(const std::string& key, const std::string& value)
 // 0: 30 fps (original), 1: 60 fps, 2: 120 fps (60 + an interpolated frame between each pair).
 int s_fps_mode = 1;
 constexpr const char* kFpsValues[] = {"30", "60", "120"};
-constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps (smooth)", "120 fps (smooth)"};
+constexpr const char* kFpsLabels[] = {"30 fps (original)", "60 fps", "120 fps (interpolated)"};
 
 void ApplyInterpolation()
 {
-  // The game's own logic always runs at its original rate (30 in the field, 60 in menus):
-  // forcing 60 fps logic soft-locked scripted scenes (Phenac's mayor). Smoothness comes from
-  // rendered in-between frames: 1 present per video field for 60 fps, 2 for 120.
-  FrameInterpolation::SetPresentsPerField(s_fps_mode == 2 ? 2 : 1);
-  FrameInterpolation::SetEnabled(s_fps_mode != 0);
+  // 60 and 120 run the game's logic at 60 (settings mask 0x00). 120 adds one rendered
+  // in-between frame per game frame (2 presents per video field).
+  FrameInterpolation::SetPresentsPerField(2);
+  FrameInterpolation::SetEnabled(s_fps_mode == 2);
 }
 int s_aspect = 1;  // index into kAspects
 
@@ -173,12 +178,33 @@ void LoadGameOptions()
 
 // Write the settings bytes straight into game memory so they take effect immediately;
 // the launcher writes the same bytes into main.dol at the next start.
+// Scripted field scenes are timed for the game's own pacing: at 60 fps game logic, Rui's
+// walk after the mayor's talk never finished and the game soft-locked. So while a script
+// has control of a field map the game runs at its original pacing; 60 everywhere else.
+bool FieldScriptRunning()
+{
+  auto& system = Core::System::GetInstance();
+  const u8* p = system.GetMemory().GetPointerForRange(kFieldBlockAddr, 0x20);
+  if (!p)
+    return false;
+  const auto be32 = [p](int at) {
+    return u32(p[at]) << 24 | u32(p[at + 1]) << 16 | u32(p[at + 2]) << 8 | u32(p[at + 3]);
+  };
+  const bool field = be32(0x00) == 300 && be32(0x18) == 0x41400000;
+  return field && be32(0x1C) == 0;
+}
+
+u8 WantedFpsMask()
+{
+  return s_fps_mode != 0 && !FieldScriptRunning() ? 0x00 : 0xFF;
+}
+
 std::array<u8, 8> WantedGameSettings()
 {
   u32 bits;
   std::memcpy(&bits, &kAspects[s_aspect].multiplier, 4);
-  // Byte 0: original frame pacing (see ApplyInterpolation).
-  return {0xFF, 0, 0, 0, static_cast<u8>(bits >> 24), static_cast<u8>(bits >> 16),
+  // Byte 0: frame-rate mask, 0x00 = 60 fps game logic, 0xFF = the game's own 30/60.
+  return {WantedFpsMask(), 0, 0, 0, static_cast<u8>(bits >> 24), static_cast<u8>(bits >> 16),
           static_cast<u8>(bits >> 8), static_cast<u8>(bits)};
 }
 
@@ -195,20 +221,26 @@ void PokeGameSettings()
   std::memcpy(p, wanted.data(), wanted.size());
 }
 
-// Save states keep the settings bytes they were made with (older builds forced 60 fps
-// game logic), so check them now and then and put the current ones back.
+// Called every presented frame: the frame-rate mask follows who is in control (player or
+// script), and save states keep the settings bytes they were made with, so the current
+// ones are put back when they differ.
 void KeepGameSettings()
 {
-  static u32 n = 0;
-  if (n++ % 30 != 0)
-    return;
   auto& system = Core::System::GetInstance();
   if (Core::GetState(system) != Core::State::Running)
     return;
   const u8* p = system.GetMemory().GetPointerForRange(kSettingsAddr, 8);
-  const auto wanted = WantedGameSettings();
-  if (p && std::memcmp(p, wanted.data(), wanted.size()) != 0)
+  if (!p)
+    return;
+  static u32 n = 0;
+  const bool full_check = n++ % 30 == 0;
+  if (p[0] != WantedFpsMask() && std::getenv("COLO_LOG_PACING"))
+    std::fprintf(stderr, "[pacing] %s\n", WantedFpsMask() ? "script: original" : "player: 60");
+  if (p[0] != WantedFpsMask() ||
+      (full_check && std::memcmp(p, WantedGameSettings().data(), 8) != 0))
+  {
     PokeGameSettings();
+  }
 }
 
 void ApplyDolphinAspect()

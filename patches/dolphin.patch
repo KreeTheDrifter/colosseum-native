@@ -424,10 +424,10 @@ index 69a0968..c19049f 100644
    FreeLookCamera.cpp
 diff --git a/Source/Core/VideoCommon/FrameInterpolation.cpp b/Source/Core/VideoCommon/FrameInterpolation.cpp
 new file mode 100644
-index 0000000..ea23f09
+index 0000000..38289d5
 --- /dev/null
 +++ b/Source/Core/VideoCommon/FrameInterpolation.cpp
-@@ -0,0 +1,1122 @@
+@@ -0,0 +1,1126 @@
 +// Copyright 2026 Colosseum Native
 +// SPDX-License-Identifier: GPL-2.0-or-later
 +
@@ -1273,7 +1273,11 @@ index 0000000..ea23f09
 +void Replay()
 +{
 +  // In-between frames needed before this one: it will be on screen for about as many fields
-+  // as the last one, and each field gets PresentsPerField() presents.
++  // as the last one, and each field gets PresentsPerField() presents. Frames the game holds
++  // for more than one field (its own 30 fps scripted scenes) are shown as they are: filling
++  // a 33 ms gap made objects flicker and pop in.
++  if (s_fields_per_frame > 1)
++    return;
 +  const int count = std::clamp(s_fields_per_frame * s_presents_per_field.load() - 1, 0, 3);
 +  if (count == 0)
 +    return;

@@ -104,15 +104,18 @@ of the same kind in the previous frame, and matrix loads whose in-order partner 
 worse than a nearby one take the closest (a blinking cursor sharing a window frame's
 texture shifts the order).
 
-Game logic always runs at its original pacing. The DOL setting that forces 60 Hz logic
-everywhere (0x80266370 = 0x00) soft-locks scripted scenes: after the mayor's forced
-dialogue in Phenac the player can't move. So the presenter measures D, the fields per
-game frame (1 in towns at 60, 2 in the field at 30), and the output runs at M presents
-per field (M = 1 for "60 smooth", 2 for "120 smooth"): D*M-1 in-between frames (max 3)
-at t = k/(D*M). Late-matching (pass 2, loose signature) also takes the nearest unused
-candidate rather than the in-order one.
+Pacing: "60" and "120" run the game logic at 60 (settings mask 0x00), except while a
+script has control of a field map. Scripted field scenes are timed for the original
+pacing: at 60, Rui's walk after Phenac's mayor dialogue never completed and the player
+stayed locked. The runtime (`runtime/game_menu.cpp`, every presented frame) reads the
+field-control block at 0x80426BE0 (+0x00 = 300 and +0x18 = 12.0f while a field map is
+active, +0x1C = 1 while the player has control) and sets the mask to 0xFF only for
+"field active and no player control". Battles (block zeroed) stay at 60.
+Build 9 tried original pacing everywhere plus 1-3 interpolated frames per 30 fps frame;
+too many artefacts (flicker, pop-in) where objects can't be matched, so frames the game
+holds for more than one field are no longer interpolated.
 
-Menu: Frame rate 30 (original) / 60 (smooth) / 120 (smooth). 144 Hz displays show it best with
+Menu: Frame rate 30 (original) / 60 / 120 (interpolated). 144 Hz displays show it best with
 VRR (FreeSync/G-Sync); fixed 144 Hz would need in-between frames at varying t, which
 is a later step.
 

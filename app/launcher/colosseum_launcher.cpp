@@ -267,10 +267,7 @@ std::vector<uint8_t> PatchDol(std::vector<uint8_t> dol, const GameSettings& sett
   for (const DolPatch& p : kDolPatches)
     Put32(dol, DolOffset(dol, p.address), p.replacement);
   const size_t at = DolOffset(dol, kSettingsAddr);
-  // Always the game's own frame pacing: 60 fps game logic soft-locked scripted scenes.
-  // 60/120 fps output comes from interpolated frames in the runtime.
-  (void)settings.fps60;
-  dol[at] = kFpsMaskOriginal;
+  dol[at] = settings.fps60 ? kFpsMask60 : kFpsMaskOriginal;
   uint32_t bits;
   memcpy(&bits, &settings.aspect_multiplier, 4);
   Put32(dol, at + 4, bits);
