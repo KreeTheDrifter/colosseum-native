@@ -57,6 +57,10 @@ WINBASEAPI HANDLE WINAPI FindFirstFileExFromAppW(LPCWSTR file_name, FINDEX_INFO_
                                                  LPVOID search_filter, DWORD additional_flags);
 }
 
+// hidclass.h; referenced by the (unused on Xbox) real-Wiimote scanner.
+extern "C" const GUID GUID_DEVINTERFACE_HID = {
+    0x4d1e55b2, 0xf16f, 0x11cf, {0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}};
+
 namespace fs = std::filesystem;
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::Wrappers::HStringReference;

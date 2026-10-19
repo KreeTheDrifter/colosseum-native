@@ -18,5 +18,9 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 set(WINFLAGS "-D____FIReference_1_boolean_INTERFACE_DEFINED__ -D_UNICODE -UWINAPI_FAMILY -DWINAPI_FAMILY=WINAPI_FAMILY_DESKTOP_APP -D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DNTDDI_VERSION=0x0A00000C -idirafter $ENV{CASE_SHIM}")
 set(CMAKE_C_FLAGS_INIT "${WINFLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${WINFLAGS}")
-set(CMAKE_EXE_LINKER_FLAGS_INIT "-static")
-set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static")
+# windowsapp first, so functions resolve to the API sets UWP apps may import rather than to
+# kernel32/advapi32/user32, and none of CMake's default desktop libraries.
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-static -Wl,-lwindowsapp")
+set(CMAKE_C_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
+set(CMAKE_CXX_STANDARD_LIBRARIES "" CACHE STRING "" FORCE)
+set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static -Wl,-lwindowsapp")
