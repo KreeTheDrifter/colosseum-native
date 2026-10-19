@@ -1,0 +1,505 @@
+== errors ==
+94:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/Core/Core.cpp:110:1: note: declare 'static' if the variable is not intended to be used outside of this translation unit
+100:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/Core/Core.cpp:114:1: note: declare 'static' if the variable is not intended to be used outside of this translation unit
+138:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+144:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+150:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+156:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+163:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/InputCommon/GCAdapter.cpp:220:8: warning: unused variable 'last_read_failed' [-Wunused-variable]
+164:C/C++:   220 |   bool last_read_failed = false;
+173:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+179:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+185:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+191:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+201:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+207:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+213:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+219:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+238:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+244:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+250:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+256:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+271:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+277:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+283:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+289:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+304:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+310:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+316:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+322:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+337:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+343:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+349:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+355:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+370:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+376:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+382:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+388:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+403:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+409:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+415:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+421:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+434:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+440:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+446:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+452:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+465:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+471:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+477:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+483:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+498:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+504:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+510:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+516:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+525:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+531:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+537:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+543:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+554:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+560:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+566:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+572:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+584:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+590:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+596:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+602:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+611:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+617:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+623:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+629:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+638:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+644:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+650:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+656:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+669:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+675:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+681:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+687:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+702:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+708:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+714:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+720:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+733:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+739:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+745:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+751:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+766:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+772:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+778:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+784:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+797:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+803:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+809:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+815:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+828:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+834:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+840:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+846:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+855:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+861:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+867:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+873:C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+951:w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/ControllerInterface.kt:176:39 'static field VIBRATOR_SERVICE: String' is deprecated. Deprecated in Java.
+953:w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/DolphinSensorEventListener.kt:103:29 'static field TYPE_TEMPERATURE: Int' is deprecated. Deprecated in Java.
+
+== last 400 lines ==
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Spirv.cpp:4:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Spirv.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.cpp:4:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/TextureCacheBase.cpp:46:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h:15:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/MaterialResource.h:23:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/ShaderResource.h:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Assets/ShaderAsset.h:17:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/VideoConfig.cpp:28:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h:16:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h:6:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h:15:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/MaterialResource.h:23:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/ShaderResource.h:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Assets/ShaderAsset.h:17:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/VertexShaderManager.cpp:20:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h:15:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/MaterialResource.h:23:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/ShaderResource.h:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Assets/ShaderAsset.h:17:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/VideoBackendBase.cpp:57:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h:16:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h:6:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h:15:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/MaterialResource.h:23:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/ShaderResource.h:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Assets/ShaderAsset.h:17:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/VertexManagerBase.cpp:29:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h:15:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/MaterialResource.h:23:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Resources/ShaderResource.h:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/Assets/ShaderAsset.h:17:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/VertexLoaderARM64.cpp:122:13: warning: 4 enumeration values not handled in switch: 'Float', 'InvalidFloat5', 'InvalidFloat6'... [-Wswitch]
+C/C++:   122 |     switch (format)
+C/C++:       |             ^~~~~~
+C/C++: 1 warning generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoBackends/OGL/OGLShader.cpp:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoBackends/Vulkan/ShaderCompiler.cpp:11:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoCommon/ShaderCompileUtils.h:11:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:46: warning: constructor parameter 'headerName' shadows the field 'headerName' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                              ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:610:31: note: previous declaration is here
+C/C++:   610 |             const std::string headerName;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:76: warning: constructor parameter 'headerData' shadows the field 'headerData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                            ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:616:31: note: previous declaration is here
+C/C++:   616 |             const char* const headerData;
+C/C++:       |                               ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:101: warning: constructor parameter 'headerLength' shadows the field 'headerLength' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                     ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:617:26: note: previous declaration is here
+C/C++:   617 |             const size_t headerLength;
+C/C++:       |                          ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:604:121: warning: constructor parameter 'userData' shadows the field 'userData' of 'IncludeResult' [-Wshadow-field-in-constructor]
+C/C++:   604 |             IncludeResult(const std::string& headerName, const char* const headerData, const size_t headerLength, void* userData) :
+C/C++:       |                                                                                                                         ^
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/glslang/glslang/glslang/../glslang/Public/ShaderLang.h:619:19: note: previous declaration is here
+C/C++:   619 |             void* userData;
+C/C++:       |                   ^
+C/C++: 4 warnings generated.
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoBackends/Vulkan/VulkanLoader.cpp:5:
+C/C++: In file included from /home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Core/VideoBackends/Vulkan/VulkanLoader.h:74:
+C/C++: /home/runner/work/colosseum-native/colosseum-native/dolphin/Externals/VulkanMemoryAllocator/include/vk_mem_alloc.h:6207:11: warning: private field 'placeholder' is not used [-Wunused-private-field]
+C/C++:  6207 |     void* placeholder = VMA_NULL;
+C/C++:       |           ^
+C/C++: 1 warning generated.
+
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseNativeLibs
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:stripReleaseDebugSymbols
+> Task :app:expandReleaseL8ArtProfileWildcards
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:dataBindingMergeDependencyArtifactsRelease
+> Task :app:generateReleaseResValues
+> Task :app:generateReleaseResources
+> Task :app:mergeReleaseNativeDebugMetadata
+
+> Task :app:mergeReleaseResources
+/home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/res/values/strings.xml:683:4: Multiple substitutions specified in non-positional format of string resource string/slider_setting_float_value. Did you mean to add the formatted="false" attribute?
+/home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/res/values/strings.xml:84:4: Multiple substitutions specified in non-positional format of string resource string/slider_setting_value. Did you mean to add the formatted="false" attribute?
+
+> Task :app:generateReleaseBuildConfig
+> Task :app:packageReleaseResources
+> Task :app:processReleaseNavigationResources
+> Task :app:javaPreCompileRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:compileReleaseNavigationResources
+> Task :app:generateReleaseRFile
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:dataBindingGenBaseClassesRelease
+> Task :app:processReleaseManifestForPackage
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:compressReleaseAssets
+> Task :app:processReleaseResources
+
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/NativeLibrary.kt:582:57 'field scaledDensity: Float' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/NativeLibrary.kt:585:59 'field scaledDensity: Float' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/ConvertActivity.kt:50:9 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/CustomFilePickerActivity.kt:18:33 'fun getSerializableExtra(p0: String!): Serializable?' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/CustomFilePickerActivity.kt:18:72 Unchecked cast of 'Serializable?' to 'HashSet<String>?'.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/EmulationActivity.kt:314:68 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/EmulationActivity.kt:346:18 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/EmulationActivity.kt:422:28 'static fun getLayoutDirection(p0: @NonNull() View): Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/EmulationActivity.kt:422:64 'static field LAYOUT_DIRECTION_LTR: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/UserDataActivity.kt:132:9 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/UserDataActivity.kt:163:9 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/activities/UserDataActivity.kt:165:9 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/adapters/PlatformPagerAdapter.kt:7:8 'class FragmentPagerAdapter : PagerAdapter' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/adapters/PlatformPagerAdapter.kt:16:5 'class FragmentPagerAdapter : PagerAdapter' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/dialogs/AlertMessage.kt:33:48 'static field yes: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/dialogs/AlertMessage.kt:36:48 'static field no: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/cheats/ui/CheatsActivity.kt:119:30 'static fun getLayoutDirection(p0: @NonNull() View): Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/cheats/ui/CheatsActivity.kt:119:70 'static field LAYOUT_DIRECTION_RTL: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/cheats/ui/CheatsActivity.kt:124:30 'static fun getLayoutDirection(p0: @NonNull() View): Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/cheats/ui/CheatsActivity.kt:124:70 'static field LAYOUT_DIRECTION_RTL: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/cheats/ui/CheatsActivity.kt:153:9 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/ControllerInterface.kt:161:49 'val vibrator: Vibrator!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/ControllerInterface.kt:176:39 'static field VIBRATOR_SERVICE: String' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/ControllerInterface.kt:186:22 'fun vibrate(p0: Long): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/input/model/DolphinSensorEventListener.kt:103:29 'static field TYPE_TEMPERATURE: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/riivolution/ui/RiivolutionBootActivity.kt:78:9 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/riivolution/ui/RiivolutionViewHolder.kt:32:30 'fun setTextAppearance(p0: Context!, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsActivity.kt:233:9 'fun onBackPressed(): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsAdapter.kt:293:22 'fun setColorFilter(p0: Int, p1: PorterDuff.Mode): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/features/settings/ui/SettingsAdapter.kt:331:22 'fun setColorFilter(p0: Int, p1: PorterDuff.Mode): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/MenuFragment.kt:93:28 'static fun getLayoutDirection(p0: @NonNull() View): Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/fragments/MenuFragment.kt:93:64 'static field LAYOUT_DIRECTION_LTR: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1419:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1421:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1527:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1529:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1636:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1638:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1744:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1746:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1813:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1815:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1937:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:1939:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:2006:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:2008:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:2138:59 'val defaultDisplay: Display!' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/overlay/InputOverlay.kt:2140:17 'fun getMetrics(p0: DisplayMetrics!): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/services/SyncChannelJobService.kt:51:22 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/ui/platform/PlatformGamesFragment.kt:76:50 'fun getSerializable(p0: String?): Serializable?' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/utils/SerializableHelper.kt:15:13 'fun getSerializableExtra(p0: String!): Serializable?' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/utils/SerializableHelper.kt:22:13 'fun getSerializable(p0: String?): Serializable?' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/colosseum-native/colosseum-native/dolphin/Source/Android/app/src/main/java/org/dolphinemu/dolphinemu/utils/ThemeHelper.kt:165:25 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:processReleaseJavaRes
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:mergeReleaseJavaResource
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:minifyReleaseWithR8
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:l8DexDesugarLibRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+BUILD SUCCESSFUL in 10m 41s
+56 actionable tasks: 56 executed
