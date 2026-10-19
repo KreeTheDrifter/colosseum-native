@@ -421,6 +421,484 @@ index b23de0a..e9fc2c3 100644
  #include "cpu_interpreter_private.h"
  
  const EstimateEntry frsqrte_table[32] = {
+diff --git a/Source/Core/AudioCommon/AudioCommon.cpp b/Source/Core/AudioCommon/AudioCommon.cpp
+index 8ec653a..d556c93 100644
+--- a/Source/Core/AudioCommon/AudioCommon.cpp
++++ b/Source/Core/AudioCommon/AudioCommon.cpp
+@@ -16,6 +16,9 @@
+ #ifdef _MSC_VER
+ #include "AudioCommon/WASAPIStream.h"
+ #endif
++#ifdef MODERNGEKKO_UWP
++#include "AudioCommon/XAudio2Stream.h"
++#endif
+ #include "Common/FileUtil.h"
+ #include "Common/Logging/Log.h"
+ #include "Common/TimeUtil.h"
+@@ -36,6 +39,10 @@ static std::unique_ptr<SoundStream> CreateSoundStreamForBackend(std::string_view
+     return std::make_unique<OpenALStream>();
+   else if (backend == BACKEND_NULLSOUND)
+     return std::make_unique<NullSound>();
++#ifdef MODERNGEKKO_UWP
++  else if (backend == BACKEND_XAUDIO2)
++    return std::make_unique<XAudio2Stream>();
++#endif
+   else if (backend == BACKEND_ALSA && AlsaSound::IsValid())
+     return std::make_unique<AlsaSound>();
+   else if (backend == BACKEND_PULSEAUDIO && PulseAudio::IsValid())
+@@ -98,7 +105,9 @@ void ShutdownSoundStream(Core::System& system)
+ 
+ std::string GetDefaultSoundBackend()
+ {
+-#if defined(ANDROID)
++#if defined(MODERNGEKKO_UWP)
++  return BACKEND_XAUDIO2;
++#elif defined(ANDROID)
+   return BACKEND_OPENSLES;
+ #else
+   if (CubebStream::IsValid())
+@@ -123,6 +132,9 @@ std::vector<std::string> GetSoundBackends()
+   std::vector<std::string> backends;
+ 
+   backends.emplace_back(BACKEND_NULLSOUND);
++#ifdef MODERNGEKKO_UWP
++  backends.emplace_back(BACKEND_XAUDIO2);
++#endif
+   if (CubebStream::IsValid())
+     backends.emplace_back(BACKEND_CUBEB);
+   if (AlsaSound::IsValid())
+@@ -164,7 +176,11 @@ bool SupportsVolumeChanges(std::string_view backend)
+   // FIXME: this one should ask the backend whether it supports it.
+   //       but getting the backend from string etc. is probably
+   //       too much just to enable/disable a stupid slider...
+-  return backend == BACKEND_CUBEB || backend == BACKEND_OPENAL || backend == BACKEND_WASAPI;
++  return backend == BACKEND_CUBEB || backend == BACKEND_OPENAL || backend == BACKEND_WASAPI
++#ifdef MODERNGEKKO_UWP
++         || backend == BACKEND_XAUDIO2
++#endif
++      ;
+ }
+ 
+ void UpdateSoundStream(Core::System& system)
+diff --git a/Source/Core/AudioCommon/CMakeLists.txt b/Source/Core/AudioCommon/CMakeLists.txt
+index 2564448..c3e83f6 100644
+--- a/Source/Core/AudioCommon/CMakeLists.txt
++++ b/Source/Core/AudioCommon/CMakeLists.txt
+@@ -72,7 +72,9 @@ else()
+   message(STATUS "PulseAudio explicitly disabled, disabling PulseAudio sound backend")
+ endif()
+ 
+-if(WIN32)
++if(MODERNGEKKO_UWP)
++  target_sources(audiocommon PRIVATE XAudio2Stream.cpp XAudio2Stream.h)
++elseif(WIN32)
+   target_sources(audiocommon PRIVATE
+     # Dolphin loads openal32.dll at runtime
+     OpenALStream.cpp
+diff --git a/Source/Core/AudioCommon/OpenALStream.h b/Source/Core/AudioCommon/OpenALStream.h
+index 1630c03..0ab1389 100644
+--- a/Source/Core/AudioCommon/OpenALStream.h
++++ b/Source/Core/AudioCommon/OpenALStream.h
+@@ -5,7 +5,7 @@
+ 
+ #include "AudioCommon/SoundStream.h"
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(MODERNGEKKO_UWP)
+ #include <al.h>
+ #include <alc.h>
+ #include <alext.h>
+@@ -48,7 +48,7 @@
+ 
+ class OpenALStream final : public SoundStream
+ {
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(MODERNGEKKO_UWP)
+ public:
+   OpenALStream() = default;
+   ~OpenALStream() override;
+diff --git a/Source/Core/AudioCommon/XAudio2Stream.cpp b/Source/Core/AudioCommon/XAudio2Stream.cpp
+new file mode 100644
+index 0000000..f054a65
+--- /dev/null
++++ b/Source/Core/AudioCommon/XAudio2Stream.cpp
+@@ -0,0 +1,139 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++// XAudio2 output for UWP / Xbox, where WASAPI's desktop device enumeration and Cubeb aren't
++// available. A feeder thread keeps a few 10 ms buffers queued on one stereo 16-bit voice.
++
++#include "AudioCommon/XAudio2Stream.h"
++
++#include <windows.h>
++#include <xaudio2.h>
++
++#include <algorithm>
++#include <array>
++#include <atomic>
++#include <chrono>
++#include <thread>
++#include <vector>
++
++#include "Common/Logging/Log.h"
++#include "Common/Thread.h"
++
++namespace
++{
++constexpr u32 kRate = 48000;
++constexpr size_t kFrames = kRate / 100;  // 10 ms
++constexpr size_t kBuffers = 4;
++}  // namespace
++
++struct XAudio2Stream::Impl
++{
++  IXAudio2* xaudio = nullptr;
++  IXAudio2MasteringVoice* master = nullptr;
++  IXAudio2SourceVoice* voice = nullptr;
++  std::array<std::vector<s16>, kBuffers> buffers;
++  size_t next = 0;
++  std::thread thread;
++  std::atomic<bool> running{false};
++  float volume = 1.0f;
++};
++
++XAudio2Stream::XAudio2Stream() : m_impl(std::make_unique<Impl>())
++{
++  m_mixer = std::make_unique<Mixer>(kRate);
++}
++
++XAudio2Stream::~XAudio2Stream()
++{
++  SetRunning(false);
++  if (m_impl->voice)
++    m_impl->voice->DestroyVoice();
++  if (m_impl->master)
++    m_impl->master->DestroyVoice();
++  if (m_impl->xaudio)
++    m_impl->xaudio->Release();
++}
++
++bool XAudio2Stream::Init()
++{
++  HRESULT hr = XAudio2Create(&m_impl->xaudio, 0, XAUDIO2_DEFAULT_PROCESSOR);
++  if (FAILED(hr))
++  {
++    ERROR_LOG_FMT(AUDIO, "XAudio2Create failed: {:08x}", static_cast<u32>(hr));
++    return false;
++  }
++  hr = m_impl->xaudio->CreateMasteringVoice(&m_impl->master, 2, kRate, 0, nullptr, nullptr,
++                                            AudioCategory_GameEffects);
++  if (FAILED(hr))
++  {
++    ERROR_LOG_FMT(AUDIO, "CreateMasteringVoice failed: {:08x}", static_cast<u32>(hr));
++    return false;
++  }
++  WAVEFORMATEX fmt{};
++  fmt.wFormatTag = WAVE_FORMAT_PCM;
++  fmt.nChannels = 2;
++  fmt.nSamplesPerSec = kRate;
++  fmt.wBitsPerSample = 16;
++  fmt.nBlockAlign = 4;
++  fmt.nAvgBytesPerSec = kRate * 4;
++  hr = m_impl->xaudio->CreateSourceVoice(&m_impl->voice, &fmt, 0, 2.0f, nullptr, nullptr,
++                                         nullptr);
++  if (FAILED(hr))
++  {
++    ERROR_LOG_FMT(AUDIO, "CreateSourceVoice failed: {:08x}", static_cast<u32>(hr));
++    return false;
++  }
++  for (auto& b : m_impl->buffers)
++    b.assign(kFrames * 2, 0);
++  m_impl->voice->SetVolume(m_impl->volume, XAUDIO2_COMMIT_NOW);
++  return true;
++}
++
++void XAudio2Stream::SetVolume(int volume)
++{
++  m_impl->volume = std::clamp(volume, 0, 100) / 100.0f;
++  if (m_impl->voice)
++    m_impl->voice->SetVolume(m_impl->volume, XAUDIO2_COMMIT_NOW);
++}
++
++bool XAudio2Stream::SetRunning(bool running)
++{
++  Impl& s = *m_impl;
++  if (!s.voice)
++    return false;
++  if (running == s.running)
++    return true;
++  if (!running)
++  {
++    s.running = false;
++    if (s.thread.joinable())
++      s.thread.join();
++    s.voice->Stop(0, XAUDIO2_COMMIT_NOW);
++    s.voice->FlushSourceBuffers();
++    return true;
++  }
++  s.running = true;
++  s.voice->Start(0, XAUDIO2_COMMIT_NOW);
++  s.thread = std::thread([this] {
++    Common::SetCurrentThreadName("XAudio2 feeder");
++    Impl& st = *m_impl;
++    while (st.running)
++    {
++      XAUDIO2_VOICE_STATE state{};
++      st.voice->GetState(&state, XAUDIO2_VOICE_NOSAMPLESPLAYED);
++      if (state.BuffersQueued >= kBuffers - 1)
++      {
++        std::this_thread::sleep_for(std::chrono::milliseconds(2));
++        continue;
++      }
++      auto& buf = st.buffers[st.next];
++      st.next = (st.next + 1) % kBuffers;
++      m_mixer->Mix(buf.data(), kFrames);
++      XAUDIO2_BUFFER xb{};
++      xb.AudioBytes = static_cast<UINT32>(buf.size() * sizeof(s16));
++      xb.pAudioData = reinterpret_cast<const BYTE*>(buf.data());
++      st.voice->SubmitSourceBuffer(&xb, nullptr);
++    }
++  });
++  return true;
++}
+diff --git a/Source/Core/AudioCommon/XAudio2Stream.h b/Source/Core/AudioCommon/XAudio2Stream.h
+new file mode 100644
+index 0000000..5e6b968
+--- /dev/null
++++ b/Source/Core/AudioCommon/XAudio2Stream.h
+@@ -0,0 +1,25 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <memory>
++
++#include "AudioCommon/SoundStream.h"
++
++#define BACKEND_XAUDIO2 "XAudio2"
++
++class XAudio2Stream final : public SoundStream
++{
++public:
++  XAudio2Stream();
++  ~XAudio2Stream() override;
++  static bool IsValid() { return true; }
++  bool Init() override;
++  void SetVolume(int volume) override;
++  bool SetRunning(bool running) override;
++
++private:
++  struct Impl;
++  std::unique_ptr<Impl> m_impl;
++};
+diff --git a/Source/Core/Common/DynamicLibrary.cpp b/Source/Core/Common/DynamicLibrary.cpp
+index ca6c17b..772dbd3 100644
+--- a/Source/Core/Common/DynamicLibrary.cpp
++++ b/Source/Core/Common/DynamicLibrary.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "Common/DynamicLibrary.h"
+ 
++#include <cctype>
+ #include <cstring>
+ 
+ #include <fmt/format.h>
+@@ -13,6 +14,97 @@
+ #include <dlfcn.h>
+ #endif
+ 
++#ifdef MODERNGEKKO_UWP
++#include <d3d11.h>
++#include <d3d12.h>
++#include <d3dcompiler.h>
++#include <dxgi1_3.h>
++
++#include <filesystem>
++
++#include "Common/StringUtil.h"
++
++// UWP apps can only LoadPackagedLibrary() their own DLLs. The system DLLs Dolphin opens by
++// name are linked instead, and "opening" one returns a handle into this table.
++namespace
++{
++HRESULT WINAPI CreateDXGIFactoryShim(REFIID riid, void** factory)
++{
++  return CreateDXGIFactory1(riid, factory);
++}
++BOOL WINAPI IsApiSetImplementedShim(PCSTR)
++{
++  return TRUE;
++}
++
++struct SystemSymbol
++{
++  const char* name;
++  void* address;
++};
++struct SystemLibrary
++{
++  const char* names[3];
++  SystemSymbol symbols[6];
++};
++
++const SystemLibrary kSystemLibraries[] = {
++    {{"dxgi.dll"},
++     {{"CreateDXGIFactory", reinterpret_cast<void*>(&CreateDXGIFactoryShim)},
++      {"CreateDXGIFactory1", reinterpret_cast<void*>(&CreateDXGIFactory1)},
++      {"CreateDXGIFactory2", reinterpret_cast<void*>(&CreateDXGIFactory2)}}},
++    {{"d3d11.dll"}, {{"D3D11CreateDevice", reinterpret_cast<void*>(&D3D11CreateDevice)}}},
++    {{"d3d12.dll"},
++     {{"D3D12CreateDevice", reinterpret_cast<void*>(&D3D12CreateDevice)},
++      {"D3D12GetDebugInterface", reinterpret_cast<void*>(&D3D12GetDebugInterface)},
++      {"D3D12SerializeRootSignature", reinterpret_cast<void*>(&D3D12SerializeRootSignature)}}},
++    {{"d3dcompiler_47.dll"}, {{"D3DCompile", reinterpret_cast<void*>(&D3DCompile)}}},
++    {{"api-ms-win-core-memory-l1-1-6.dll", "kernelbase.dll"},
++     {{"VirtualAlloc2FromApp", reinterpret_cast<void*>(&VirtualAlloc2FromApp)},
++      {"MapViewOfFile3FromApp", reinterpret_cast<void*>(&MapViewOfFile3FromApp)},
++      {"UnmapViewOfFileEx", reinterpret_cast<void*>(&UnmapViewOfFileEx)}}},
++    {{"kernel32.dll"},
++     {{"IsApiSetImplemented", reinterpret_cast<void*>(&IsApiSetImplementedShim)},
++      {"UnmapViewOfFileEx", reinterpret_cast<void*>(&UnmapViewOfFileEx)}}},
++};
++
++const SystemLibrary* FindSystemLibrary(const void* handle)
++{
++  for (const SystemLibrary& lib : kSystemLibraries)
++    if (handle == &lib)
++      return &lib;
++  return nullptr;
++}
++
++const SystemLibrary* FindSystemLibrary(const char* filename)
++{
++  std::string lower = filename;
++  for (char& c : lower)
++    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++  for (const SystemLibrary& lib : kSystemLibraries)
++    for (const char* name : lib.names)
++      if (name && lower == name)
++        return &lib;
++  return nullptr;
++}
++
++// LoadPackagedLibrary takes a path relative to the package root (the exe's folder).
++std::wstring PackageRelative(const char* filename)
++{
++  namespace fs = std::filesystem;
++  const fs::path path = fs::u8path(filename);
++  if (!path.is_absolute())
++    return path.wstring();
++  wchar_t exe[MAX_PATH];
++  const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
++  const fs::path root = fs::path(std::wstring(exe, n)).parent_path();
++  std::error_code ec;
++  const fs::path rel = fs::relative(path, root, ec);
++  return ec || rel.empty() ? path.filename().wstring() : rel.wstring();
++}
++}  // namespace
++#endif
++
+ namespace Common
+ {
+ DynamicLibrary::DynamicLibrary() = default;
+@@ -79,7 +171,12 @@ std::string DynamicLibrary::GetVersionedFilename(const char* libname, int major,
+ 
+ bool DynamicLibrary::Open(const char* filename)
+ {
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++  if (const SystemLibrary* lib = FindSystemLibrary(filename))
++    m_handle = const_cast<SystemLibrary*>(lib);
++  else
++    m_handle = reinterpret_cast<void*>(LoadPackagedLibrary(PackageRelative(filename).c_str(), 0));
++#elif defined(_WIN32)
+   m_handle = reinterpret_cast<void*>(LoadLibraryA(filename));
+ #else
+   m_handle = dlopen(filename, RTLD_NOW);
+@@ -92,7 +189,10 @@ void DynamicLibrary::Close()
+   if (!IsOpen())
+     return;
+ 
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++  if (!FindSystemLibrary(m_handle))
++    FreeLibrary(static_cast<HMODULE>(m_handle));
++#elif defined(_WIN32)
+   FreeLibrary(static_cast<HMODULE>(m_handle));
+ #else
+   dlclose(m_handle);
+@@ -102,7 +202,16 @@ void DynamicLibrary::Close()
+ 
+ void* DynamicLibrary::GetSymbolAddress(const char* name) const
+ {
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++  if (const SystemLibrary* lib = FindSystemLibrary(m_handle))
++  {
++    for (const SystemSymbol& sym : lib->symbols)
++      if (sym.name && std::strcmp(sym.name, name) == 0)
++        return sym.address;
++    return nullptr;
++  }
++  return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(m_handle), name));
++#elif defined(_WIN32)
+   return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(m_handle), name));
+ #else
+   return reinterpret_cast<void*>(dlsym(m_handle, name));
+diff --git a/Source/Core/Common/WindowSystemInfo.h b/Source/Core/Common/WindowSystemInfo.h
+index 9d15477..9d122cc 100644
+--- a/Source/Core/Common/WindowSystemInfo.h
++++ b/Source/Core/Common/WindowSystemInfo.h
+@@ -3,6 +3,8 @@
+ 
+ #pragma once
+ 
++#include <cstdint>
++
+ enum class WindowSystemType
+ {
+   Headless,
+@@ -13,6 +15,7 @@ enum class WindowSystemType
+   Wayland,
+   FBDev,
+   Haiku,
++  UWP,
+ };
+ 
+ struct WindowSystemInfo
+@@ -43,4 +46,8 @@ struct WindowSystemInfo
+ 
+   // Scale of the render surface. For hidpi systems, this will be >1.
+   float render_surface_scale = 1.0f;
++
++  // UWP: CoreWindow size in pixels (no HWND to query).
++  uint32_t render_width = 0;
++  uint32_t render_height = 0;
+ };
+diff --git a/Source/Core/Core/CMakeLists.txt b/Source/Core/Core/CMakeLists.txt
+index f30654c..4189fa9 100644
+--- a/Source/Core/Core/CMakeLists.txt
++++ b/Source/Core/Core/CMakeLists.txt
+@@ -766,7 +766,7 @@ PUBLIC
+   pugixml
+   sfml-network
+   videonull
+-  videoogl
++  $<$<NOT:$<BOOL:${MODERNGEKKO_UWP}>>:videoogl>
+   videosoftware
+ 
+ PRIVATE
+@@ -853,7 +853,7 @@ if(WIN32)
+   )
+   # VideoBackends is configured after Core, so if(TARGET ...) is always false
+   # here. D3D/D3D12 are added whenever WIN32 AND MSVC, mirror that condition.
+-  if(MSVC)
++  if(MSVC OR MODERNGEKKO_UWP)
+     target_link_libraries(core PUBLIC videod3d12 videod3d)
+   endif()
+   target_compile_definitions(core PRIVATE "-D_WINSOCK_DEPRECATED_NO_WARNINGS")
 diff --git a/Source/Core/Core/CoreTiming.cpp b/Source/Core/Core/CoreTiming.cpp
 index 26e9973..acebb5b 100644
 --- a/Source/Core/Core/CoreTiming.cpp
@@ -687,6 +1165,22 @@ index d91ec2d..9647b4d 100644
          SyncOut();
          if ((ppc.Exceptions & SYNC_EXCEPTION_MASK) != 0)
            power_pc.CheckExceptions();
+diff --git a/Source/Core/DolphinNoGUI/Platform.h b/Source/Core/DolphinNoGUI/Platform.h
+index 5b0729a..378cc45 100644
+--- a/Source/Core/DolphinNoGUI/Platform.h
++++ b/Source/Core/DolphinNoGUI/Platform.h
+@@ -48,7 +48,10 @@ public:
+   static std::unique_ptr<Platform> CreateFBDevPlatform();
+ #endif
+ 
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++  // Implemented by the UWP app (CoreWindow host).
++  static std::unique_ptr<Platform> CreateUWPPlatform();
++#elif defined(_WIN32)
+   static std::unique_ptr<Platform> CreateWin32Platform();
+ #endif
+ 
 diff --git a/Source/Core/DolphinNoGUI/PlatformWin32.cpp b/Source/Core/DolphinNoGUI/PlatformWin32.cpp
 index 3402fda..71f1fca 100644
 --- a/Source/Core/DolphinNoGUI/PlatformWin32.cpp
@@ -844,6 +1338,676 @@ index 8d0ae0c..f4a5bb3 100644
        if (key == XK_Escape && (event.xkey.state & ControlMask))
        {
          RequestShutdown();
+diff --git a/Source/Core/InputCommon/CMakeLists.txt b/Source/Core/InputCommon/CMakeLists.txt
+index ddf8c30..6a229ad 100644
+--- a/Source/Core/InputCommon/CMakeLists.txt
++++ b/Source/Core/InputCommon/CMakeLists.txt
+@@ -87,7 +87,13 @@ PRIVATE
+   spng::spng
+ )
+ 
+-if(WIN32)
++if(MODERNGEKKO_UWP)
++  target_sources(inputcommon PRIVATE
++    ControllerInterface/UWP/UWPGamepad.cpp
++    ControllerInterface/UWP/UWPGamepad.h
++  )
++  target_link_libraries(inputcommon PRIVATE runtimeobject)
++elseif(WIN32)
+   target_sources(inputcommon PRIVATE
+     ControllerInterface/DInput/DInput.cpp
+     ControllerInterface/DInput/DInput.h
+diff --git a/Source/Core/InputCommon/ControllerInterface/ControllerInterface.cpp b/Source/Core/InputCommon/ControllerInterface/ControllerInterface.cpp
+index 20fd517..f66a847 100644
+--- a/Source/Core/InputCommon/ControllerInterface/ControllerInterface.cpp
++++ b/Source/Core/InputCommon/ControllerInterface/ControllerInterface.cpp
+@@ -9,6 +9,9 @@
+ #include "Common/Logging/Log.h"
+ #include "Core/HW/WiimoteReal/WiimoteReal.h"
+ 
++#ifdef CIFACE_USE_UWP
++#include "InputCommon/ControllerInterface/UWP/UWPGamepad.h"
++#endif
+ #ifdef CIFACE_USE_WIN32
+ #include "InputCommon/ControllerInterface/Win32/Win32.h"
+ #endif
+@@ -61,6 +64,9 @@ void ControllerInterface::Initialize(const WindowSystemInfo& wsi)
+ #ifdef CIFACE_USE_WIN32
+   m_input_backends.emplace_back(ciface::Win32::CreateInputBackend(this));
+ #endif
++#ifdef CIFACE_USE_UWP
++  m_input_backends.emplace_back(ciface::UWPGamepad::CreateInputBackend(this));
++#endif
+ #ifdef CIFACE_USE_XLIB
+   m_input_backends.emplace_back(ciface::XInput2::CreateInputBackend(this));
+ #endif
+diff --git a/Source/Core/InputCommon/ControllerInterface/ControllerInterface.h b/Source/Core/InputCommon/ControllerInterface/ControllerInterface.h
+index 8f7f4ba..9caed31 100644
+--- a/Source/Core/InputCommon/ControllerInterface/ControllerInterface.h
++++ b/Source/Core/InputCommon/ControllerInterface/ControllerInterface.h
+@@ -16,7 +16,9 @@
+ #include "InputCommon/ControllerInterface/InputBackend.h"
+ 
+ // enable disable sources
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++#define CIFACE_USE_UWP
++#elif defined(_WIN32)
+ #define CIFACE_USE_WIN32
+ #endif
+ #ifdef HAVE_X11
+diff --git a/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.cpp b/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.cpp
+new file mode 100644
+index 0000000..62458fd
+--- /dev/null
++++ b/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.cpp
+@@ -0,0 +1,256 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++// Xbox controllers on UWP (Xbox Dev Mode) through Windows.Gaming.Input, using the plain ABI
++// interfaces (no C++/WinRT). XInput isn't available to UWP apps. Devices and inputs use the
++// same names as the desktop XInput backend ("XInput/0/Gamepad", "Button A", "Shoulder R",
++// "Left X+", ...) so controller profiles made on a PC work unchanged.
++
++#include "InputCommon/ControllerInterface/UWP/UWPGamepad.h"
++
++#include <windows.h>
++#include <roapi.h>
++#include <windows.gaming.input.h>
++#include <wrl/client.h>
++#include <wrl/wrappers/corewrappers.h>
++
++#include <algorithm>
++#include <array>
++#include <optional>
++#include <atomic>
++#include <chrono>
++#include <mutex>
++#include <thread>
++#include <vector>
++
++#include "Common/Logging/Log.h"
++#include "InputCommon/ControllerInterface/ControllerInterface.h"
++
++namespace WGI = ABI::Windows::Gaming::Input;
++using Microsoft::WRL::ComPtr;
++
++namespace ciface::UWPGamepad
++{
++namespace
++{
++struct ButtonDef
++{
++  const char* name;
++  UINT32 mask;
++};
++constexpr std::array<ButtonDef, 14> kButtons{{
++    {"Button A", WGI::GamepadButtons_A},
++    {"Button B", WGI::GamepadButtons_B},
++    {"Button X", WGI::GamepadButtons_X},
++    {"Button Y", WGI::GamepadButtons_Y},
++    {"Pad N", WGI::GamepadButtons_DPadUp},
++    {"Pad S", WGI::GamepadButtons_DPadDown},
++    {"Pad W", WGI::GamepadButtons_DPadLeft},
++    {"Pad E", WGI::GamepadButtons_DPadRight},
++    {"Start", WGI::GamepadButtons_Menu},
++    {"Back", WGI::GamepadButtons_View},
++    {"Shoulder L", WGI::GamepadButtons_LeftShoulder},
++    {"Shoulder R", WGI::GamepadButtons_RightShoulder},
++    {"Thumb L", WGI::GamepadButtons_LeftThumbstick},
++    {"Thumb R", WGI::GamepadButtons_RightThumbstick},
++}};
++
++class Button final : public Core::Device::Input
++{
++public:
++  Button(const WGI::GamepadReading& r, size_t i) : m_r(r), m_i(i) {}
++  std::string GetName() const override { return kButtons[m_i].name; }
++  ControlState GetState() const override
++  {
++    return (static_cast<UINT32>(m_r.Buttons) & kButtons[m_i].mask) != 0;
++  }
++
++private:
++  const WGI::GamepadReading& m_r;
++  const size_t m_i;
++};
++
++class Analog final : public Core::Device::Input
++{
++public:
++  Analog(std::string name, const DOUBLE& value, double sign)
++      : m_name(std::move(name)), m_value(value), m_sign(sign)
++  {
++  }
++  std::string GetName() const override { return m_name; }
++  ControlState GetState() const override { return std::max(0.0, m_value * m_sign); }
++
++private:
++  const std::string m_name;
++  const DOUBLE& m_value;
++  const double m_sign;
++};
++
++class Device;
++
++class Motor final : public Core::Device::Output
++{
++public:
++  Motor(std::string name, Device* parent, DOUBLE& value)
++      : m_name(std::move(name)), m_parent(parent), m_value(value)
++  {
++  }
++  std::string GetName() const override { return m_name; }
++  void SetState(ControlState state) override;
++
++private:
++  const std::string m_name;
++  Device* const m_parent;
++  DOUBLE& m_value;
++};
++
++class Device final : public Core::Device
++{
++public:
++  Device(ComPtr<WGI::IGamepad> pad, int index) : m_pad(std::move(pad)), m_index(index)
++  {
++    for (size_t i = 0; i < kButtons.size(); ++i)
++      AddInput(new Button(m_reading, i));
++    AddInput(new Analog("Trigger L", m_reading.LeftTrigger, 1.0));
++    AddInput(new Analog("Trigger R", m_reading.RightTrigger, 1.0));
++    const std::array<std::pair<const char*, const DOUBLE*>, 4> axes{{
++        {"Left X", &m_reading.LeftThumbstickX},
++        {"Left Y", &m_reading.LeftThumbstickY},
++        {"Right X", &m_reading.RightThumbstickX},
++        {"Right Y", &m_reading.RightThumbstickY},
++    }};
++    for (const auto& [name, value] : axes)
++    {
++      AddInput(new Analog(std::string(name) + '-', *value, -1.0));
++      AddInput(new Analog(std::string(name) + '+', *value, 1.0));
++    }
++    AddOutput(new Motor("Motor L", this, m_vibration.LeftMotor));
++    AddOutput(new Motor("Motor R", this, m_vibration.RightMotor));
++  }
++
++  std::string GetName() const override { return "Gamepad"; }
++  std::string GetSource() const override { return "XInput"; }
++  std::optional<int> GetPreferredId() const override { return m_index; }
++  int GetSortPriority() const override { return -2; }
++
++  Core::DeviceRemoval UpdateInput() override
++  {
++    WGI::GamepadReading reading{};
++    if (SUCCEEDED(m_pad->GetCurrentReading(&reading)))
++      m_reading = reading;
++    return Core::DeviceRemoval::Keep;
++  }
++
++  void UpdateMotors() { m_pad->put_Vibration(m_vibration); }
++  WGI::IGamepad* Pad() const { return m_pad.Get(); }
++
++private:
++  ComPtr<WGI::IGamepad> m_pad;
++  const int m_index;
++  WGI::GamepadReading m_reading{};
++  WGI::GamepadVibration m_vibration{};
++};
++
++void Motor::SetState(ControlState state)
++{
++  const DOUBLE v = std::clamp(state, 0.0, 1.0);
++  if (v == m_value)
++    return;
++  m_value = v;
++  m_parent->UpdateMotors();
++}
++
++ComPtr<WGI::IGamepadStatics> GetStatics()
++{
++  ComPtr<WGI::IGamepadStatics> statics;
++  const HRESULT hr = RoGetActivationFactory(
++      Microsoft::WRL::Wrappers::HStringReference(RuntimeClass_Windows_Gaming_Input_Gamepad).Get(),
++      __uuidof(WGI::IGamepadStatics), &statics);
++  if (FAILED(hr))
++    ERROR_LOG_FMT(CONTROLLERINTERFACE, "Windows.Gaming.Input unavailable: {:08x}",
++                  static_cast<u32>(hr));
++  return statics;
++}
++
++std::vector<ComPtr<WGI::IGamepad>> ListPads(WGI::IGamepadStatics* statics)
++{
++  std::vector<ComPtr<WGI::IGamepad>> out;
++  ComPtr<ABI::Windows::Foundation::Collections::IVectorView<WGI::Gamepad*>> pads;
++  if (!statics || FAILED(statics->get_Gamepads(&pads)) || !pads)
++    return out;
++  unsigned count = 0;
++  pads->get_Size(&count);
++  for (unsigned i = 0; i < count; ++i)
++  {
++    ComPtr<WGI::IGamepad> pad;
++    if (SUCCEEDED(pads->GetAt(i, &pad)) && pad)
++      out.push_back(pad);
++  }
++  return out;
++}
++
++class InputBackend final : public ciface::InputBackend
++{
++public:
++  explicit InputBackend(ControllerInterface* ci) : ciface::InputBackend(ci)
++  {
++    m_statics = GetStatics();
++    // Controllers connect (and the console reports them) after the app starts, and can come
++    // and go; poll the list and repopulate on a change.
++    m_watcher = std::thread([this] {
++      RoInitialize(RO_INIT_MULTITHREADED);
++      while (!m_stop)
++      {
++        std::this_thread::sleep_for(std::chrono::milliseconds(500));
++        const auto pads = ListPads(m_statics.Get());
++        bool changed;
++        {
++          std::lock_guard lock(m_mutex);
++          changed = pads.size() != m_known.size();
++          for (size_t i = 0; !changed && i < pads.size(); ++i)
++            changed = pads[i].Get() != m_known[i];
++        }
++        if (changed)
++          GetControllerInterface().PlatformPopulateDevices([this] { PopulateDevices(); });
++      }
++      RoUninitialize();
++    });
++  }
++
++  ~InputBackend() override
++  {
++    m_stop = true;
++    if (m_watcher.joinable())
++      m_watcher.join();
++  }
++
++  void PopulateDevices() override
++  {
++    GetControllerInterface().RemoveDevice(
++        [](const auto* dev) { return dev->GetSource() == "XInput"; });
++    const auto pads = ListPads(m_statics.Get());
++    {
++      std::lock_guard lock(m_mutex);
++      m_known.clear();
++      for (const auto& p : pads)
++        m_known.push_back(p.Get());
++    }
++    int index = 0;
++    for (const auto& pad : pads)
++      GetControllerInterface().AddDevice(std::make_shared<Device>(pad, index++));
++  }
++
++private:
++  ComPtr<WGI::IGamepadStatics> m_statics;
++  std::thread m_watcher;
++  std::atomic<bool> m_stop{false};
++  std::mutex m_mutex;
++  std::vector<WGI::IGamepad*> m_known;
++};
++}  // namespace
++
++std::unique_ptr<ciface::InputBackend> CreateInputBackend(ControllerInterface* controller_interface)
++{
++  return std::make_unique<InputBackend>(controller_interface);
++}
++}  // namespace ciface::UWPGamepad
+diff --git a/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.h b/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.h
+new file mode 100644
+index 0000000..fe03bf3
+--- /dev/null
++++ b/Source/Core/InputCommon/ControllerInterface/UWP/UWPGamepad.h
+@@ -0,0 +1,13 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <memory>
++
++#include "InputCommon/ControllerInterface/InputBackend.h"
++
++namespace ciface::UWPGamepad
++{
++std::unique_ptr<ciface::InputBackend> CreateInputBackend(ControllerInterface* controller_interface);
++}
+diff --git a/Source/Core/VideoBackends/CMakeLists.txt b/Source/Core/VideoBackends/CMakeLists.txt
+index e56dd03..2920ada 100644
+--- a/Source/Core/VideoBackends/CMakeLists.txt
++++ b/Source/Core/VideoBackends/CMakeLists.txt
+@@ -1,9 +1,11 @@
+-add_subdirectory(OGL)
++if(NOT MODERNGEKKO_UWP)
++  add_subdirectory(OGL)
++endif()
+ add_subdirectory(Null)
+ add_subdirectory(Software)
+ 
+ if(WIN32)
+-  if(MSVC)
++  if(MSVC OR MODERNGEKKO_UWP)
+     add_subdirectory(D3DCommon)
+     add_subdirectory(D3D)
+     add_subdirectory(D3D12)
+diff --git a/Source/Core/VideoBackends/D3D/CMakeLists.txt b/Source/Core/VideoBackends/D3D/CMakeLists.txt
+index ed75b29..28d440c 100644
+--- a/Source/Core/VideoBackends/D3D/CMakeLists.txt
++++ b/Source/Core/VideoBackends/D3D/CMakeLists.txt
+@@ -34,3 +34,8 @@ if(MSVC)
+   # Add precompiled header
+   target_link_libraries(videod3d PRIVATE use_pch)
+ endif()
++
++if(MINGW)
++  # d3d11.h helper structs MinGW's header lacks.
++  target_compile_options(videod3d PRIVATE -include "${CMAKE_CURRENT_SOURCE_DIR}/D3D11Compat.h")
++endif()
+diff --git a/Source/Core/VideoBackends/D3D/D3D11Compat.h b/Source/Core/VideoBackends/D3D/D3D11Compat.h
+new file mode 100644
+index 0000000..3a7b3da
+--- /dev/null
++++ b/Source/Core/VideoBackends/D3D/D3D11Compat.h
+@@ -0,0 +1,190 @@
++// Copyright 2026 Colosseum Native
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++// d3d11.h helper structs that MinGW's header lacks (the Windows SDK has them), with the same
++// constructors as the SDK. Force-included into the D3D11 backend when building with MinGW.
++#pragma once
++
++#include <d3d11.h>
++
++#if defined(__MINGW32__) && defined(__cplusplus)
++struct CD3D11_BOX : public D3D11_BOX
++{
++  CD3D11_BOX() = default;
++  CD3D11_BOX(LONG l, LONG t, LONG f, LONG r, LONG b, LONG bk)
++  {
++    left = UINT(l);
++    top = UINT(t);
++    front = UINT(f);
++    right = UINT(r);
++    bottom = UINT(b);
++    back = UINT(bk);
++  }
++};
++
++struct CD3D11_RECT : public D3D11_RECT
++{
++  CD3D11_RECT() = default;
++  CD3D11_RECT(LONG l, LONG t, LONG r, LONG b)
++  {
++    left = l;
++    top = t;
++    right = r;
++    bottom = b;
++  }
++};
++
++struct CD3D11_VIEWPORT : public D3D11_VIEWPORT
++{
++  CD3D11_VIEWPORT() = default;
++  CD3D11_VIEWPORT(FLOAT x, FLOAT y, FLOAT w, FLOAT h, FLOAT min_depth = 0.0f,
++                  FLOAT max_depth = 1.0f)
++  {
++    TopLeftX = x;
++    TopLeftY = y;
++    Width = w;
++    Height = h;
++    MinDepth = min_depth;
++    MaxDepth = max_depth;
++  }
++};
++
++struct CD3D11_DEPTH_STENCIL_VIEW_DESC : public D3D11_DEPTH_STENCIL_VIEW_DESC
++{
++  CD3D11_DEPTH_STENCIL_VIEW_DESC() = default;
++  CD3D11_DEPTH_STENCIL_VIEW_DESC(D3D11_DSV_DIMENSION dim, DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN,
++                                 UINT mip_slice = 0, UINT first_slice = 0, UINT array_size = UINT(-1),
++                                 UINT flags = 0)
++  {
++    Format = format;
++    ViewDimension = dim;
++    Flags = flags;
++    switch (dim)
++    {
++    case D3D11_DSV_DIMENSION_TEXTURE1D:
++      Texture1D.MipSlice = mip_slice;
++      break;
++    case D3D11_DSV_DIMENSION_TEXTURE1DARRAY:
++      Texture1DArray.MipSlice = mip_slice;
++      Texture1DArray.FirstArraySlice = first_slice;
++      Texture1DArray.ArraySize = array_size;
++      break;
++    case D3D11_DSV_DIMENSION_TEXTURE2D:
++      Texture2D.MipSlice = mip_slice;
++      break;
++    case D3D11_DSV_DIMENSION_TEXTURE2DARRAY:
++      Texture2DArray.MipSlice = mip_slice;
++      Texture2DArray.FirstArraySlice = first_slice;
++      Texture2DArray.ArraySize = array_size;
++      break;
++    case D3D11_DSV_DIMENSION_TEXTURE2DMS:
++      break;
++    case D3D11_DSV_DIMENSION_TEXTURE2DMSARRAY:
++      Texture2DMSArray.FirstArraySlice = first_slice;
++      Texture2DMSArray.ArraySize = array_size;
++      break;
++    default:
++      break;
++    }
++  }
++};
++
++struct CD3D11_UNORDERED_ACCESS_VIEW_DESC : public D3D11_UNORDERED_ACCESS_VIEW_DESC
++{
++  CD3D11_UNORDERED_ACCESS_VIEW_DESC() = default;
++  CD3D11_UNORDERED_ACCESS_VIEW_DESC(ID3D11Texture2D* tex, D3D11_UAV_DIMENSION dim,
++                                    DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN, UINT mip_slice = 0,
++                                    UINT first_slice = 0, UINT array_size = UINT(-1))
++  {
++    ViewDimension = dim;
++    if (format == DXGI_FORMAT_UNKNOWN || (array_size == UINT(-1) &&
++                                          dim == D3D11_UAV_DIMENSION_TEXTURE2DARRAY))
++    {
++      D3D11_TEXTURE2D_DESC desc;
++      tex->GetDesc(&desc);
++      if (format == DXGI_FORMAT_UNKNOWN)
++        format = desc.Format;
++      if (array_size == UINT(-1))
++        array_size = desc.ArraySize - first_slice;
++    }
++    Format = format;
++    if (dim == D3D11_UAV_DIMENSION_TEXTURE2D)
++    {
++      Texture2D.MipSlice = mip_slice;
++    }
++    else
++    {
++      Texture2DArray.MipSlice = mip_slice;
++      Texture2DArray.FirstArraySlice = first_slice;
++      Texture2DArray.ArraySize = array_size;
++    }
++  }
++};
++// Declared in MinGW's d3d11.h but never defined there; bodies as in the Windows SDK.
++inline CD3D11_SHADER_RESOURCE_VIEW_DESC::CD3D11_SHADER_RESOURCE_VIEW_DESC(
++    ID3D11Buffer*, DXGI_FORMAT format, UINT first_elem, UINT elem_cnt, UINT flags)
++{
++  Format = format;
++  ViewDimension = D3D11_SRV_DIMENSION_BUFFEREX;
++  BufferEx.FirstElement = first_elem;
++  BufferEx.NumElements = elem_cnt;
++  BufferEx.Flags = flags;
++}
++
++inline CD3D11_SHADER_RESOURCE_VIEW_DESC::CD3D11_SHADER_RESOURCE_VIEW_DESC(
++    ID3D11Texture2D* texture, D3D11_SRV_DIMENSION dim, DXGI_FORMAT format, UINT most_detailed_mip,
++    UINT mip_levels, UINT first_slice, UINT array_size)
++{
++  ViewDimension = dim;
++  if (format == DXGI_FORMAT_UNKNOWN || mip_levels == UINT(-1) ||
++      (array_size == UINT(-1) && (dim == D3D11_SRV_DIMENSION_TEXTURE2DARRAY ||
++                                  dim == D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY ||
++                                  dim == D3D11_SRV_DIMENSION_TEXTURECUBEARRAY)))
++  {
++    D3D11_TEXTURE2D_DESC desc;
++    texture->GetDesc(&desc);
++    if (format == DXGI_FORMAT_UNKNOWN)
++      format = desc.Format;
++    if (mip_levels == UINT(-1))
++      mip_levels = desc.MipLevels - most_detailed_mip;
++    if (array_size == UINT(-1))
++    {
++      array_size = desc.ArraySize - first_slice;
++      if (dim == D3D11_SRV_DIMENSION_TEXTURECUBEARRAY)
++        array_size /= 6;
++    }
++  }
++  Format = format;
++  switch (dim)
++  {
++  case D3D11_SRV_DIMENSION_TEXTURE2D:
++    Texture2D.MostDetailedMip = most_detailed_mip;
++    Texture2D.MipLevels = mip_levels;
++    break;
++  case D3D11_SRV_DIMENSION_TEXTURE2DARRAY:
++    Texture2DArray.MostDetailedMip = most_detailed_mip;
++    Texture2DArray.MipLevels = mip_levels;
++    Texture2DArray.FirstArraySlice = first_slice;
++    Texture2DArray.ArraySize = array_size;
++    break;
++  case D3D11_SRV_DIMENSION_TEXTURE2DMS:
++    break;
++  case D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY:
++    Texture2DMSArray.FirstArraySlice = first_slice;
++    Texture2DMSArray.ArraySize = array_size;
++    break;
++  case D3D11_SRV_DIMENSION_TEXTURECUBE:
++    TextureCube.MostDetailedMip = most_detailed_mip;
++    TextureCube.MipLevels = mip_levels;
++    break;
++  case D3D11_SRV_DIMENSION_TEXTURECUBEARRAY:
++    TextureCubeArray.MostDetailedMip = most_detailed_mip;
++    TextureCubeArray.MipLevels = mip_levels;
++    TextureCubeArray.First2DArrayFace = first_slice;
++    TextureCubeArray.NumCubes = array_size;
++    break;
++  default:
++    break;
++  }
++}
++#endif
+diff --git a/Source/Core/VideoBackends/D3D/D3DBase.cpp b/Source/Core/VideoBackends/D3D/D3DBase.cpp
+index 954dcd3..9f18628 100644
+--- a/Source/Core/VideoBackends/D3D/D3DBase.cpp
++++ b/Source/Core/VideoBackends/D3D/D3DBase.cpp
+@@ -153,7 +153,8 @@ void Destroy()
+     {
+       // print out alive objects, but only if we actually have pending references
+       // note this will also print out internal live objects to the debug console
+-      s_debug->ReportLiveDeviceObjects(D3D11_RLDO_SUMMARY | D3D11_RLDO_DETAIL);
++      s_debug->ReportLiveDeviceObjects(
++          static_cast<D3D11_RLDO_FLAGS>(D3D11_RLDO_SUMMARY | D3D11_RLDO_DETAIL));
+     }
+     s_debug.Reset();
+   }
+diff --git a/Source/Core/VideoBackends/D3D/D3DBoundingBox.cpp b/Source/Core/VideoBackends/D3D/D3DBoundingBox.cpp
+index 049d090..51a1372 100644
+--- a/Source/Core/VideoBackends/D3D/D3DBoundingBox.cpp
++++ b/Source/Core/VideoBackends/D3D/D3DBoundingBox.cpp
+@@ -90,7 +90,7 @@ std::vector<BBoxType> D3DBoundingBox::Read(u32 index, u32 length)
+ 
+ void D3DBoundingBox::Write(u32 index, std::span<const BBoxType> values)
+ {
+-  D3D11_BOX box{index * sizeof(BBoxType),
++  D3D11_BOX box{static_cast<UINT>(index * sizeof(BBoxType)),
+                 0,
+                 0,
+                 static_cast<u32>((index + values.size()) * sizeof(BBoxType)),
+diff --git a/Source/Core/VideoBackends/D3D12/DX12Pipeline.cpp b/Source/Core/VideoBackends/D3D12/DX12Pipeline.cpp
+index e295a76..9ee8b8e 100644
+--- a/Source/Core/VideoBackends/D3D12/DX12Pipeline.cpp
++++ b/Source/Core/VideoBackends/D3D12/DX12Pipeline.cpp
+@@ -237,6 +237,10 @@ std::unique_ptr<DXPipeline> DXPipeline::Create(const AbstractPipelineConfig& con
+ 
+ AbstractPipeline::CacheData DXPipeline::GetCacheData() const
+ {
++#ifdef UWP_XBOX
++  // The Xbox's D3D12 driver doesn't support cached pipeline blobs for UWP apps.
++  return {};
++#endif
+   ComPtr<ID3DBlob> blob;
+   HRESULT hr = m_pipeline->GetCachedBlob(&blob);
+   if (FAILED(hr))
+diff --git a/Source/Core/VideoBackends/D3DCommon/SwapChain.cpp b/Source/Core/VideoBackends/D3DCommon/SwapChain.cpp
+index 1c91275..2b5ccec 100644
+--- a/Source/Core/VideoBackends/D3DCommon/SwapChain.cpp
++++ b/Source/Core/VideoBackends/D3DCommon/SwapChain.cpp
+@@ -65,7 +65,12 @@ u32 SwapChain::GetSwapChainFlags() const
+ bool SwapChain::CreateSwapChain(bool stereo, bool hdr)
+ {
+   RECT client_rc;
+-  if (GetClientRect(static_cast<HWND>(m_wsi.render_surface), &client_rc))
++  if (m_wsi.type == WindowSystemType::UWP)
++  {
++    m_width = m_wsi.render_width;
++    m_height = m_wsi.render_height;
++  }
++  else if (GetClientRect(static_cast<HWND>(m_wsi.render_surface), &client_rc))
+   {
+     m_width = client_rc.right - client_rc.left;
+     m_height = client_rc.bottom - client_rc.top;
+@@ -96,10 +101,24 @@ bool SwapChain::CreateSwapChain(bool stereo, bool hdr)
+     swap_chain_desc.Flags = GetSwapChainFlags();
+ 
+     Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain1;
++    if (m_wsi.type == WindowSystemType::UWP)
++    {
++      // Xbox/UWP: the surface is the app's CoreWindow (as IUnknown).
++      hr = dxgi_factory2->CreateSwapChainForCoreWindow(
++          m_d3d_device.Get(), static_cast<::IUnknown*>(m_wsi.render_surface), &swap_chain_desc,
++          nullptr, &swap_chain1);
++      m_swap_chain = swap_chain1;
++      if (FAILED(hr))
++      {
++        PanicAlertFmt("Failed to create swap chain: {}", Common::HRWrap(hr));
++        return false;
++      }
++    }
++    else
+     hr = dxgi_factory2->CreateSwapChainForHwnd(m_d3d_device.Get(),
+                                                static_cast<HWND>(m_wsi.render_surface),
+                                                &swap_chain_desc, nullptr, nullptr, &swap_chain1);
+-    if (FAILED(hr))
++    if (m_wsi.type != WindowSystemType::UWP && FAILED(hr))
+     {
+       // Flip-model discard swapchains aren't supported on Windows 8, so here we fall back to
+       // a sequential swapchain
+@@ -109,7 +128,8 @@ bool SwapChain::CreateSwapChain(bool stereo, bool hdr)
+                                                  &swap_chain_desc, nullptr, nullptr, &swap_chain1);
+     }
+ 
+-    m_swap_chain = swap_chain1;
++    if (m_wsi.type != WindowSystemType::UWP)
++      m_swap_chain = swap_chain1;
+   }
+ 
+   // Flip-model swapchains aren't supported on Windows 7, so here we fall back to a legacy
+@@ -143,6 +163,7 @@ bool SwapChain::CreateSwapChain(bool stereo, bool hdr)
+   }
+ 
+   // We handle fullscreen ourselves.
++  if (m_wsi.type != WindowSystemType::UWP)
+   hr = m_dxgi_factory->MakeWindowAssociation(static_cast<HWND>(m_wsi.render_surface),
+                                              DXGI_MWA_NO_WINDOW_CHANGES | DXGI_MWA_NO_ALT_ENTER);
+   if (FAILED(hr))
 diff --git a/Source/Core/VideoCommon/BPStructs.cpp b/Source/Core/VideoCommon/BPStructs.cpp
 index 180bc86..7854d24 100644
 --- a/Source/Core/VideoCommon/BPStructs.cpp
@@ -2532,9 +3696,18 @@ index d596f84..2f800f2 100644
    void FlushEFBCopies();
  
 diff --git a/Source/Core/VideoCommon/VideoBackendBase.cpp b/Source/Core/VideoCommon/VideoBackendBase.cpp
-index 2a7aa1e..6f245b0 100644
+index 2a7aa1e..39b0f10 100644
 --- a/Source/Core/VideoCommon/VideoBackendBase.cpp
 +++ b/Source/Core/VideoCommon/VideoBackendBase.cpp
+@@ -26,7 +26,7 @@
+ #include "Core/System.h"
+ 
+ // TODO: ugly
+-#if defined(_WIN32) && defined(_MSC_VER)
++#if defined(_WIN32) && (defined(_MSC_VER) || defined(UWP_XBOX))
+ #include "VideoBackends/D3D/VideoBackend.h"
+ #include "VideoBackends/D3D12/VideoBackend.h"
+ #endif
 @@ -52,6 +52,7 @@
  #include "VideoCommon/Fifo.h"
  #include "VideoCommon/FrameDumper.h"
@@ -2543,7 +3716,26 @@ index 2a7aa1e..6f245b0 100644
  #include "VideoCommon/GeometryShaderManager.h"
  #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
  #include "VideoCommon/OnScreenDisplay.h"
-@@ -376,6 +377,7 @@ void VideoBackendBase::ShutdownShared()
+@@ -205,11 +206,17 @@ const std::vector<std::unique_ptr<VideoBackendBase>>& VideoBackendBase::GetAvail
+     std::vector<std::unique_ptr<VideoBackendBase>> backends;
+ 
+ #ifdef _WIN32
+-#ifdef _MSC_VER
++#if defined(_MSC_VER) || defined(UWP_XBOX)
++#if defined(UWP_XBOX)
++    // Xbox: D3D12 is native there; D3D11 is a layer on top of it.
++    backends.push_back(std::make_unique<DX12::VideoBackend>());
++    backends.push_back(std::make_unique<DX11::VideoBackend>());
++#else
+     backends.push_back(std::make_unique<DX11::VideoBackend>());
+     backends.push_back(std::make_unique<DX12::VideoBackend>());
+ #endif
+ #endif
++#endif
+ #ifdef HAS_OPENGL
+     backends.push_back(std::make_unique<OGL::VideoBackend>());
+ #endif
+@@ -376,6 +383,7 @@ void VideoBackendBase::ShutdownShared()
    auto& system = Core::System::GetInstance();
    system.GetCustomResourceManager().Shutdown();
  

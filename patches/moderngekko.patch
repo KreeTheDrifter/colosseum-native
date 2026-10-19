@@ -1,8 +1,33 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index c0548a0..f15e4fa 100644
+index c0548a0..2c60171 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -241,6 +241,7 @@ target_link_libraries(moderngekko PUBLIC ModernGekko::ABI PRIVATE fmt::fmt)
+@@ -18,6 +18,8 @@ option(MODERNGEKKO_ENABLE_DYNAMIC_MODULES
+        "Load game modules through the host dynamic-library API"
+        ${MODERNGEKKO_DYNAMIC_MODULES_DEFAULT})
+ 
++option(MODERNGEKKO_UWP "Build for UWP (Xbox Dev Mode): no desktop runners, app from MODERNGEKKO_UWP_APP_DIR" OFF)
++set(MODERNGEKKO_UWP_APP_DIR "" CACHE PATH "Directory with the UWP app's CMakeLists.txt")
+ option(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME
+        "Build the RecompCore/Dolphin production chassis" ON)
+ option(MODERNGEKKO_ENABLE_DOLPHIN_TESTS
+@@ -105,7 +107,14 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+     set(ENCODE_FRAMEDUMPS OFF CACHE BOOL "" FORCE)
+     set(ENABLE_LLVM OFF CACHE BOOL "" FORCE)
+     # Cubeb is Dolphin's only audio backend on macOS
+-    if(APPLE OR WIN32)
++    if(MODERNGEKKO_UWP)
++        # Xbox: no Vulkan/GL/SDL/libusb; audio is XAudio2 from the app.
++        set(ENABLE_CUBEB OFF CACHE BOOL "" FORCE)
++        set(ENABLE_VULKAN OFF CACHE BOOL "" FORCE)
++        set(ENABLE_SDL OFF CACHE BOOL "" FORCE)
++        set(ENABLE_CLI_TOOL OFF CACHE BOOL "" FORCE)
++        add_compile_definitions(UWP_XBOX=1 MODERNGEKKO_UWP=1)
++    elseif(APPLE OR WIN32)
+         set(ENABLE_CUBEB ON CACHE BOOL "" FORCE)
+     else()
+         set(ENABLE_CUBEB OFF CACHE BOOL "" FORCE)
+@@ -241,6 +250,7 @@ target_link_libraries(moderngekko PUBLIC ModernGekko::ABI PRIVATE fmt::fmt)
  if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
      target_sources(moderngekko PRIVATE
          src/runtime/dolphin_runtime.cpp
@@ -10,19 +35,43 @@ index c0548a0..f15e4fa 100644
          tools/automation_protocol.cpp
          vendor/dolphin/Source/Core/DolphinNoGUI/Platform.cpp
          vendor/dolphin/Source/Core/DolphinNoGUI/PlatformHeadless.cpp
-@@ -249,7 +250,10 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
+@@ -249,8 +259,11 @@ if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
          target_sources(moderngekko PRIVATE
              vendor/dolphin/Source/Core/InputCommon/ControllerInterface/Touch/InputOverrider.cpp)
      endif()
 -    target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+-    if(WIN32)
 +    target_include_directories(moderngekko PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools"
 +        "${CMAKE_CURRENT_SOURCE_DIR}/src/frontend")
 +    # In-game menu draws with Dolphin's ImGui.
 +    target_link_libraries(moderngekko PRIVATE imgui)
-     if(WIN32)
++    if(WIN32 AND NOT MODERNGEKKO_UWP)
          target_sources(moderngekko PRIVATE
              vendor/dolphin/Source/Core/DolphinNoGUI/PlatformWin32.cpp)
-@@ -1056,3 +1060,15 @@ if(BUILD_TESTING)
+         target_link_libraries(moderngekko PRIVATE dwmapi)
+@@ -396,14 +409,20 @@ else()
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/dolphin_legacy")
+ endif()
+ 
++if(NOT MODERNGEKKO_UWP)
+ add_executable(moderngekko-module-info
+     tools/module_info.cpp
+ )
+ target_link_libraries(moderngekko-module-info
+     PRIVATE ModernGekko::Runtime
+ )
++endif()
+ 
+-if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME)
++if(MODERNGEKKO_UWP AND MODERNGEKKO_UWP_APP_DIR)
++    add_subdirectory("${MODERNGEKKO_UWP_APP_DIR}" uwp-app)
++endif()
++
++if(MODERNGEKKO_ENABLE_DOLPHIN_RUNTIME AND NOT MODERNGEKKO_UWP)
+     if(TARGET SDL3-static)
+         set(_moderngekko_sdl_target SDL3-static)
+     elseif(TARGET SDL3::SDL3-shared)
+@@ -1056,3 +1075,15 @@ if(BUILD_TESTING)
      add_test(NAME moderngekko.dolphin_shader
               COMMAND moderngekko_dolphin_shader_test)
  endif()
@@ -52,7 +101,7 @@ index aeafd0e..73d5997 100644
  std::optional<std::string> HashDirectorySha256(const std::filesystem::path& root);
  }  // namespace moderngekko
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..2b60681 100644
+index f9b5405..bd14e22 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -41,6 +41,8 @@
@@ -82,7 +131,19 @@ index f9b5405..2b60681 100644
    if (!inspected)
      return {{}, RuntimeError{RuntimeErrorCode::InvalidGame, inspected.error}};
  
-@@ -700,11 +702,14 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -616,7 +618,10 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+ 
+   if (impl->config.headless)
+     impl->platform = Platform::CreateHeadlessPlatform();
+-#ifdef _WIN32
++#if defined(MODERNGEKKO_UWP)
++  else
++    impl->platform = Platform::CreateUWPPlatform();
++#elif defined(_WIN32)
+   else
+     impl->platform = Platform::CreateWin32Platform();
+ #endif
+@@ -700,11 +705,14 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
      recomp_source = StaticRecompModuleSource::Attached(
          reinterpret_cast<const StaticRecompModuleDesc *>(
              impl->config.module.descriptor));
@@ -102,7 +163,7 @@ index f9b5405..2b60681 100644
    jit.SetStaticRecompModuleSource(std::move(recomp_source));
  
    s_runtime_active = true;
-@@ -782,6 +787,7 @@ RuntimeRunResult Runtime::Run() {
+@@ -782,6 +790,7 @@ RuntimeRunResult Runtime::Run() {
          if (state == Core::State::Uninitialized && m_impl->platform)
            m_impl->platform->Stop();
        });
